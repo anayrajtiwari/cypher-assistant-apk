@@ -2,6 +2,7 @@ package ai.cypher.assistant
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import kotlinx.coroutines.*
 import java.util.Locale
 
 class CypherDaemon(private val context: Context) {
@@ -10,6 +11,7 @@ class CypherDaemon(private val context: Context) {
     private var ttsReady = false
     private var wakeWord: WakeWordDetector? = null
     private var isRunning = false
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     val brain = CypherBrain(context)
     val permissions = PermissionManager(context)
@@ -32,14 +34,16 @@ class CypherDaemon(private val context: Context) {
         try {
             wakeWord = WakeWordDetector(context) {
                 speak("At your service, Boss.")
-                try {
-                    val stt = STTEngine(context)
-                    val text = stt.transcribe(timeoutMs = 7000)
-                    if (text.isNotBlank()) {
-                        handleCommand(text)
+                scope.launch {
+                    try {
+                        val stt = STTEngine(context)
+                        val text = stt.transcribe(timeoutMs = 7000)
+                        if (text.isNotBlank()) {
+                            handleCommand(text)
+                        }
+                    } catch (_: Exception) {
+                        speak("I had trouble hearing you, Boss.")
                     }
-                } catch (_: Exception) {
-                    speak("I had trouble hearing you, Boss.")
                 }
             }
             wakeWord?.startListening()
@@ -50,6 +54,7 @@ class CypherDaemon(private val context: Context) {
 
     fun stop() {
         isRunning = false
+        scope.cancel()
         wakeWord?.stopListening()
         tts?.stop()
         tts?.shutdown()

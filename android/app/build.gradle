@@ -5,7 +5,7 @@ plugins {
 
 android {
     namespace 'ai.cypher.assistant'
-    compileSdk 33
+    compileSdk 34
 
     defaultConfig {
         applicationId "ai.cypher.assistant"

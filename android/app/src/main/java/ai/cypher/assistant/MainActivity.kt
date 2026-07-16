@@ -40,11 +40,12 @@ class MainActivity : AppCompatActivity() {
         requestPermissions()
         startCypherService()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(llmReceiver, IntentFilter("ai.cypher.assistant.LLM_EVENT"), Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(llmReceiver, IntentFilter("ai.cypher.assistant.LLM_EVENT"))
-        }
+        ContextCompat.registerReceiver(
+            this,
+            llmReceiver,
+            IntentFilter("ai.cypher.assistant.LLM_EVENT"),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true

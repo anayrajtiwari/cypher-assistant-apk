@@ -5,7 +5,7 @@ cypher_app/android/app/build/
 cypher_app/android/local.properties
 cypher_app/android/.idea/
 cypher_app/android/*.iml
-cypher_app/android/gradle/wrapper/gradle-wrapper.jar
+# gradle-wrapper.jar and gradlew ARE committed — needed for CI builds
 
 # Python
 **/__pycache__/

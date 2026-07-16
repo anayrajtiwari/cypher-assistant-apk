@@ -52,3 +52,12 @@ jobs:
         with:
           name: cypher-debug
           path: cypher_app/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload APK to Release
+        run: |
+          gh release upload v1.0 \
+            --repo anayrajtiwari/cypher-assistant-apk \
+            --clobber \
+            cypher_app/android/app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -90,7 +90,44 @@ class CypherBackgroundService : Service() {
         }
     }
 
+    private fun extractAssetModelIfNeeded(): File? {
+        val targetFile = File(filesDir, "cypher-1.5b-q4_0.gguf")
+        if (targetFile.exists() && targetFile.length() > 50000000L) {
+            return targetFile
+        }
+
+        try {
+            val assetList = assets.list("") ?: emptyArray()
+            if (assetList.contains("cypher-1.5b-q4_0.gguf")) {
+                Log.i("CypherLLM", "Extracting bundled GGUF model from APK assets to app filesDir...")
+                notifyUI("STATUS_UPDATE", "Unpacking bundled AI model (1.15 GB)...")
+
+                assets.open("cypher-1.5b-q4_0.gguf").use { inputStream ->
+                    java.io.FileOutputStream(targetFile).use { outputStream ->
+                        val buffer = ByteArray(64 * 1024)
+                        var bytesRead: Int
+                        while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                            outputStream.write(buffer, 0, bytesRead)
+                        }
+                        outputStream.flush()
+                    }
+                }
+                Log.i("CypherLLM", "Successfully extracted asset model to: ${targetFile.absolutePath}")
+                return targetFile
+            }
+        } catch (e: Exception) {
+            Log.e("CypherLLM", "Failed to extract asset model", e)
+        }
+
+        return null
+    }
+
     private fun findModelFile(): File? {
+        val extractedAsset = extractAssetModelIfNeeded()
+        if (extractedAsset != null) {
+            return extractedAsset
+        }
+
         val appExtDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
         val candidates = mutableListOf(
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "cypher-1.5b-q4_0.gguf"),

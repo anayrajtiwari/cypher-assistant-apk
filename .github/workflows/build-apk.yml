@@ -31,18 +31,21 @@ jobs:
         with:
           gradle-version: '8.2'
 
+      - name: Download & Bundle GGUF Model into Assets
+        run: |
+          mkdir -p android/app/src/main/assets
+          echo "Downloading GGUF model (1.15 GB) into assets..."
+          curl -L -o android/app/src/main/assets/cypher-1.5b-q4_0.gguf "https://huggingface.co/Qwen/Qwen1.5-1.8B-Chat-GGUF/resolve/main/qwen1.5-1_8b-chat-q4_0.gguf"
+
       - name: Build Standalone APK with Gradle
         run: |
           cd android
           gradle assembleDebug
 
-
-
-
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Cypher-v2.0-standalone.apk
+          name: Cypher-v3.0-bundled.apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Create Release & Release Asset
@@ -50,8 +53,8 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: android/app/build/outputs/apk/debug/app-debug.apk
-          tag_name: v2.0
-          name: "Cypher OS AI Assistant v2.0 Standalone APK"
-          body: "Official standalone APK for Cypher OS Agent. Includes 3D Blue Hologram HUD, Android 16 Auto-Start, Call Interceptor, Recorder, and 'zed_one_eight' Wake Word Listener."
+          tag_name: v3.0-bundled
+          name: "Cypher OS AI Assistant v3.0 Self-Contained APK (GGUF Model Bundled Inside)"
+          body: "100% Self-Contained APK. The 1.15 GB Cypher-1.5B GGUF Model is bundled directly inside this APK. Zero external downloads or storage setup required."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

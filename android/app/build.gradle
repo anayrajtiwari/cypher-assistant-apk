@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace 'ai.cypher.assistant'
-    compileSdk 34
+    compileSdk 35
 
     defaultConfig {
         applicationId "ai.cypher.assistant"
         minSdk 26
-        targetSdk 33
-        versionCode 1
-        versionName "2.0"
+        targetSdk 35
+        versionCode 3
+        versionName "2.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }

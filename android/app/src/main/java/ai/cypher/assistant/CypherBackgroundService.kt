@@ -75,14 +75,39 @@ class CypherBackgroundService : Service() {
         startForeground(NOTIFICATION_ID, notification)
     }
 
+    private fun tryLoadNativeLibs() {
+        val libs = listOf(
+            "rnllama_v8_2_dotprod_i8mm",
+            "rnllama_v8_2_dotprod",
+            "rnllama_v8_2_i8mm",
+            "rnllama_v8_2",
+            "rnllama_v8",
+            "rnllama"
+        )
+        for (lib in libs) {
+            try {
+                System.loadLibrary(lib)
+                Log.i("CypherLLM", "Successfully pre-loaded native LLM library: $lib")
+                break
+            } catch (e: Throwable) {
+                Log.w("CypherLLM", "Could not load native library $lib, trying next...")
+            }
+        }
+    }
+
     private fun findModelFile(): File? {
-        val candidates = listOf(
+        val appExtDir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+        val candidates = mutableListOf(
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "cypher-1.5b-q4_0.gguf"),
             File("/sdcard/Download/cypher-1.5b-q4_0.gguf"),
             File("/storage/emulated/0/Download/cypher-1.5b-q4_0.gguf"),
             File(getExternalFilesDir(null), "cypher-1.5b-q4_0.gguf"),
             File(filesDir, "cypher-1.5b-q4_0.gguf")
         )
+        if (appExtDir != null) {
+            candidates.add(0, File(appExtDir, "cypher-1.5b-q4_0.gguf"))
+        }
+
         for (f in candidates) {
             if (f.exists() && f.length() > 50000000L) { // >50MB check
                 Log.i("CypherLLM", "Found GGUF model file at: ${f.absolutePath} (${f.length()} bytes)")
@@ -99,12 +124,14 @@ class CypherBackgroundService : Service() {
             val modelFile = findModelFile()
             if (modelFile == null) {
                 Log.e("CypherLLM", "No valid GGUF model file found in Download directories")
-                notifyUI("STATUS_UPDATE", "Model file missing in Downloads!")
+                notifyUI("STATUS_UPDATE", "Model missing. Click Check Updates to download!")
                 return@launch
             }
 
             try {
                 notifyUI("STATUS_UPDATE", "Loading local GGUF model into memory...")
+                tryLoadNativeLibs()
+
                 val pfd = ParcelFileDescriptor.open(modelFile, ParcelFileDescriptor.MODE_READ_ONLY)
                 val fd = pfd.detachFd()
 

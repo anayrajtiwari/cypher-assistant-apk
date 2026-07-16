@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: cypher_app/android
@@ -23,9 +23,22 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK 34
+      - name: Install SDK 34 + NDK
         run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-34" "build-tools;34.0.0" 2>&1 | tail -3
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
+            "platforms;android-34" "build-tools;34.0.0" \
+            "ndk;26.1.10909125" "cmake;3.22.1" 2>&1 | tail -5
+          echo "NDK installed"
+
+      - name: Download GGUF model from Release
+        run: |
+          mkdir -p app/src/main/assets/models
+          gh release download v1.0 \
+            --repo anayrajtiwari/cypher-assistant-apk \
+            --pattern "*.gguf" \
+            --dir app/src/main/assets/models/ || echo "No release asset, will download at runtime"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Debug APK
         run: |

@@ -13,25 +13,25 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
-
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
-    buildFeatures {
-        compose = true
-    }
+    buildFeatures { compose = true }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.10"
+    composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1+"
+        }
     }
 
     compileOptions {
@@ -39,13 +39,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 
-    packaging {
-        resources.excludes += setOf("META-INF/NOTICE.md", "META-INF/LICENSE.md")
-    }
+    packaging { resources.excludes += setOf("META-INF/NOTICE.md", "META-INF/LICENSE.md") }
 }
 
 dependencies {

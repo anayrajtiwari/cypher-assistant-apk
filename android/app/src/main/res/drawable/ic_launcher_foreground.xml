@@ -1,0 +1,23 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Background Circle -->
+    <path
+        android:fillColor="#070b14"
+        android:pathData="M54,54m-45,0a45,45 0,1 1,90 0a45,45 0,1 1,-90 0"/>
+    <!-- Glowing Outer Ring -->
+    <path
+        android:strokeColor="#00f0ff"
+        android:strokeWidth="3"
+        android:pathData="M54,54m-38,0a38,38 0,1 1,76 0a38,38 0,1 1,-76 0"/>
+    <!-- Hologram Core Circle -->
+    <path
+        android:fillColor="#00e5ff"
+        android:pathData="M54,54m-18,0a18,18 0,1 1,36 0a18,18 0,1 1,-36 0"/>
+    <!-- Inner Microphone/Agent Icon -->
+    <path
+        android:fillColor="#070b14"
+        android:pathData="M54,42c-2.8,0 -5,2.2 -5,5v7c0,2.8 2.2,5 5,5s5,-2.2 5,-5v-7c0,-2.8 -2.2,-5 -5,-5z"/>
+</vector>

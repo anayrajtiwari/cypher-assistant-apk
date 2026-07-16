@@ -17,19 +17,26 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Request POST_NOTIFICATIONS runtime permission on Android 13+ (API 33+)
+        // Request all essential permissions on first start (Mic, Calls, Ring Listener, Notifications)
+        val permissions = mutableListOf(
+            android.Manifest.permission.RECORD_AUDIO,
+            android.Manifest.permission.CALL_PHONE,
+            android.Manifest.permission.READ_PHONE_STATE
+        )
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            if (androidx.core.content.ContextCompat.checkSelfPermission(
-                    this,
-                    android.Manifest.permission.POST_NOTIFICATIONS
-                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                androidx.core.app.ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
-                    101
-                )
-            }
+            permissions.add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        val missingPermissions = permissions.filter {
+            androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPermissions.isNotEmpty()) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                missingPermissions.toTypedArray(),
+                101
+            )
         }
 
         webView = WebView(this).apply {
@@ -53,7 +60,9 @@ class MainActivity : AppCompatActivity() {
                     setTitle("Downloading Cypher AI Model")
                     setDescription("Fetching cypher-1.5b-q4_0.gguf (1.15 GB)")
                     setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    setDestinationInExternalPublicDir(
+                    // Save to secure app-specific files directory to avoid Scoped Storage/MTP write errors
+                    setDestinationInExternalFilesDir(
+                        context,
                         Environment.DIRECTORY_DOWNLOADS,
                         "cypher-1.5b-q4_0.gguf"
                     )

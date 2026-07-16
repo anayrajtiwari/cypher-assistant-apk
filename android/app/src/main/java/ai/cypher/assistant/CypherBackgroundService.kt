@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
@@ -15,6 +17,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
@@ -40,58 +43,50 @@ class CypherBackgroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        startForegroundService()
+        startForegroundServiceSafely()
         initLlamaEngine()
         startHotwordDetection()
     }
 
-    private fun startForegroundService() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Cypher OS Agent Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Cypher local AI engine active"
+    private fun startForegroundServiceSafely() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Cypher OS Agent Service",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Cypher local AI engine active"
+                }
+                val manager = getSystemService(NotificationManager::class.java)
+                manager?.createNotificationChannel(channel)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
-        }
 
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_IMMUTABLE
-        )
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0,
+                Intent(this, MainActivity::class.java),
+                PendingIntent.FLAG_IMMUTABLE
+            )
 
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Cypher OS AI Engaged")
-            .setContentText("Offline GGUF Engine Active")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build()
+            val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("Cypher OS AI Engaged")
+                .setContentText("Offline GGUF Engine Active")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .build()
 
-        startForeground(NOTIFICATION_ID, notification)
-    }
-
-    private fun tryLoadNativeLibs() {
-        val libs = listOf(
-            "rnllama_v8_2_dotprod_i8mm",
-            "rnllama_v8_2_dotprod",
-            "rnllama_v8_2_i8mm",
-            "rnllama_v8_2",
-            "rnllama_v8",
-            "rnllama"
-        )
-        for (lib in libs) {
-            try {
-                System.loadLibrary(lib)
-                Log.i("CypherLLM", "Successfully pre-loaded native LLM library: $lib")
-                break
-            } catch (e: Throwable) {
-                Log.w("CypherLLM", "Could not load native library $lib, trying next...")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
             }
+        } catch (e: Exception) {
+            Log.e("CypherService", "Error starting foreground notification", e)
         }
     }
 
@@ -130,7 +125,6 @@ class CypherBackgroundService : Service() {
 
             try {
                 notifyUI("STATUS_UPDATE", "Loading local GGUF model into memory...")
-                tryLoadNativeLibs()
 
                 val pfd = ParcelFileDescriptor.open(modelFile, ParcelFileDescriptor.MODE_READ_ONLY)
                 val fd = pfd.detachFd()
@@ -162,7 +156,7 @@ class CypherBackgroundService : Service() {
                     Log.e("CypherLLM", "startEngine returned null context")
                     notifyUI("STATUS_UPDATE", "Engine Initialization Failed")
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e("CypherLLM", "Error initializing GGUF engine", e)
                 notifyUI("STATUS_UPDATE", "LLM Error: ${e.message}")
             }
@@ -188,7 +182,7 @@ class CypherBackgroundService : Service() {
                 )
                 llamaAndroid?.launchCompletion(llamaContextId, params)
                 notifyUI("STREAM_END", "")
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e("CypherLLM", "Completion error", e)
                 notifyUI("STREAM_TOKEN", " [Error generating response]")
                 notifyUI("STREAM_END", "")
@@ -205,36 +199,43 @@ class CypherBackgroundService : Service() {
     }
 
     private fun startHotwordDetection() {
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.w("CypherService", "RECORD_AUDIO permission not granted yet, skipping hotword engine init")
+            return
+        }
+
         if (isRunning.getAndSet(true)) return
 
         recordingThread = Thread {
-            val bufferSize = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE,
-                AudioFormat.CHANNEL_IN_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
-
             try {
-                val record = AudioRecord(
-                    MediaRecorder.AudioSource.MIC,
+                val bufferSize = AudioRecord.getMinBufferSize(
                     SAMPLE_RATE,
                     AudioFormat.CHANNEL_IN_MONO,
-                    AudioFormat.ENCODING_PCM_16BIT,
-                    bufferSize
+                    AudioFormat.ENCODING_PCM_16BIT
                 )
 
-                if (record.state == AudioRecord.STATE_INITIALIZED) {
-                    record.startRecording()
-                    val buffer = ShortArray(bufferSize)
+                if (bufferSize > 0) {
+                    val record = AudioRecord(
+                        MediaRecorder.AudioSource.MIC,
+                        SAMPLE_RATE,
+                        AudioFormat.CHANNEL_IN_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        bufferSize
+                    )
 
-                    while (isRunning.get()) {
-                        val read = record.read(buffer, 0, buffer.size)
-                        if (read > 0) {
-                            Thread.sleep(100)
+                    if (record.state == AudioRecord.STATE_INITIALIZED) {
+                        record.startRecording()
+                        val buffer = ShortArray(bufferSize)
+
+                        while (isRunning.get()) {
+                            val read = record.read(buffer, 0, buffer.size)
+                            if (read > 0) {
+                                Thread.sleep(100)
+                            }
                         }
+                        record.stop()
+                        record.release()
                     }
-                    record.stop()
-                    record.release()
                 }
             } catch (e: Exception) {
                 Log.e("CypherService", "Hotword error", e)
@@ -256,7 +257,9 @@ class CypherBackgroundService : Service() {
         isRunning.set(false)
         recordingThread?.interrupt()
         if (llamaContextId != -1) {
-            llamaAndroid?.releaseContext(llamaContextId)
+            try {
+                llamaAndroid?.releaseContext(llamaContextId)
+            } catch (e: Throwable) {}
         }
         instance = null
         super.onDestroy()

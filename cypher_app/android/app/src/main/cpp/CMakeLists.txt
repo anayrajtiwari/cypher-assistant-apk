@@ -8,7 +8,7 @@ include(FetchContent)
 FetchContent_Declare(
     llama.cpp
     GIT_REPOSITORY https://github.com/ggerganov/llama.cpp.git
-    GIT_TAG master
+    GIT_TAG b10043
     GIT_SHALLOW TRUE
 )
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "")

@@ -6,6 +6,7 @@
 struct ModelState {
     llama_model *model = nullptr;
     llama_context *ctx = nullptr;
+    const llama_vocab *vocab = nullptr;
 };
 
 extern "C" JNIEXPORT jlong JNICALL
@@ -28,9 +29,11 @@ Java_ai_cypher_assistant_CypherBrain_nativeLoad(
     cparams.n_threads_batch = static_cast<uint32_t>(n_threads);
 
     llama_context *ctx = llama_new_context_with_model(model, cparams);
-    if (!ctx) { llama_free_model(model); return 0; }
+    if (!ctx) { llama_model_free(model); return 0; }
 
-    auto *state = new ModelState{model, ctx};
+    const llama_vocab *vocab = llama_model_get_vocab(model);
+
+    auto *state = new ModelState{model, ctx, vocab};
     return reinterpret_cast<jlong>(state);
 }
 
@@ -42,25 +45,43 @@ Java_ai_cypher_assistant_CypherBrain_nativeGenerate(
     if (!state || !state->ctx) return env->NewStringUTF("");
 
     const char *prompt_str = env->GetStringUTFChars(prompt, nullptr);
-    int n_prompt = llama_tokenize(state->ctx, prompt_str, -1, nullptr, 0, true, true);
+    std::string prompt_cpp(prompt_str);
     env->ReleaseStringUTFChars(prompt, prompt_str);
+
+    int n_prompt = llama_tokenize(state->vocab, prompt_cpp.c_str(), -1, nullptr, 0, true, true);
     if (n_prompt <= 0) return env->NewStringUTF("");
 
-    std::vector<llama_token> tokens(n_prompt);
-    llama_tokenize(state->ctx, prompt_str, -1, tokens.data(), n_prompt, true, true);
+    std::vector<llama_token> prompt_tokens(n_prompt);
+    llama_tokenize(state->vocab, prompt_cpp.c_str(), -1, prompt_tokens.data(), n_prompt, true, true);
+
+    llama_batch batch = llama_batch_get_one(prompt_tokens.data(), prompt_tokens.size());
+    if (llama_decode(state->ctx, batch) != 0) {
+        return env->NewStringUTF("");
+    }
+
+    llama_sampler_chain_params sparams = llama_sampler_chain_default_params();
+    llama_sampler *sampler_chain = llama_sampler_chain_init(sparams);
+    llama_sampler_chain_add(sampler_chain, llama_sampler_init_temp(temperature));
+    llama_sampler_chain_add(sampler_chain, llama_sampler_init_top_k(40));
+    llama_sampler_chain_add(sampler_chain, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
     std::string result;
-    for (int i = 0; i < max_tokens && i < n_prompt + max_tokens; i++) {
-        if (llama_eval(state->ctx, tokens.data(), tokens.size(), 0) != 0) break;
+    std::vector<llama_token> token_buf = {0};
 
-        llama_token id = llama_sample_token(state->ctx, temperature, 0.8f, 40, 1.1f, 64);
-        if (id == llama_token_eos(state->ctx)) break;
+    for (int i = 0; i < max_tokens; i++) {
+        llama_token id = llama_sampler_sample(sampler_chain, state->ctx, -1);
+        if (id == llama_vocab_eos(state->vocab)) break;
 
         char buf[8];
-        int n = llama_token_to_piece(state->ctx, id, buf, sizeof(buf), 0, true);
-        result.append(buf, n);
-        tokens = {id};
+        int n = llama_token_to_piece(state->vocab, id, buf, sizeof(buf), 0, true);
+        if (n > 0) result.append(buf, n);
+
+        token_buf[0] = id;
+        batch = llama_batch_get_one(token_buf.data(), 1);
+        if (llama_decode(state->ctx, batch) != 0) break;
     }
+
+    llama_sampler_free(sampler_chain);
     return env->NewStringUTF(result.c_str());
 }
 
@@ -69,7 +90,7 @@ Java_ai_cypher_assistant_CypherBrain_nativeUnload(JNIEnv *, jobject, jlong ptr) 
     auto *state = reinterpret_cast<ModelState *>(ptr);
     if (state) {
         if (state->ctx) llama_free(state->ctx);
-        if (state->model) llama_free_model(state->model);
+        if (state->model) llama_model_free(state->model);
         delete state;
     }
 }

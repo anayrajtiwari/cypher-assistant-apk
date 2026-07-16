@@ -5,7 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.speech.tts.TextToSpeech
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,11 +20,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import java.util.Locale
 
 class MainActivity : ComponentActivity() {
 
-    private val requiredPermissions = listOfNotNull(
+    private val normalPermissions = listOf(
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.CALL_PHONE,
@@ -32,17 +31,23 @@ class MainActivity : ComponentActivity() {
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.CAMERA,
-        Manifest.permission.ANSWER_PHONE_CALLS,
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.POST_NOTIFICATIONS else null,
+        Manifest.permission.POST_NOTIFICATIONS,
+        Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
+        Manifest.permission.FOREGROUND_SERVICE_PHONE_CALL,
     )
 
     private var serviceStarted = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        if (hasAllPermissions()) {
+    ) { result ->
+        val normalGranted = normalPermissions.all { perm ->
+            result[perm] ?: (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED)
+        }
+        if (normalGranted && isAnswerPhoneCallsGranted()) {
             startCypherService()
+        } else if (normalGranted && !isAnswerPhoneCallsGranted()) {
+            requestAnswerPhoneCalls()
         } else {
             Toast.makeText(this, "Cypher needs all permissions.", Toast.LENGTH_LONG).show()
         }
@@ -64,18 +69,44 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun hasAllPermissions(): Boolean {
-        return requiredPermissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+    override fun onResume() {
+        super.onResume()
+        if (!serviceStarted && hasAllPermissions()) {
+            startCypherService()
         }
     }
 
+    private fun hasAllPermissions(): Boolean {
+        return normalPermissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        } && isAnswerPhoneCallsGranted()
+    }
+
+    private fun isAnswerPhoneCallsGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED
+        } else true
+    }
+
     private fun requestAllPermissions() {
-        val needed = requiredPermissions.filter {
+        val needed = normalPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }.toTypedArray()
         if (needed.isNotEmpty()) {
             permissionLauncher.launch(needed)
+        } else if (!isAnswerPhoneCallsGranted()) {
+            requestAnswerPhoneCalls()
+        } else {
+            startCypherService()
+        }
+    }
+
+    private fun requestAnswerPhoneCalls() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.fromParts("package", packageName, null)
+            }
+            startActivity(intent)
         } else {
             startCypherService()
         }
@@ -86,11 +117,7 @@ class MainActivity : ComponentActivity() {
         serviceStarted = true
         try {
             val intent = Intent(this, CypherBackgroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent)
-            } else {
-                startService(intent)
-            }
+            startForegroundService(intent)
         } catch (e: Exception) {
             e.printStackTrace()
         }

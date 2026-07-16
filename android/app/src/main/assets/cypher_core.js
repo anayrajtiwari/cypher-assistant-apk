@@ -124,7 +124,10 @@ function triggerUpdateCheck() {
 
 function acceptUpdate() {
   closeModal();
-  speakAsCypher("Installing new model weights now, Boss. Cy will reboot in 3 seconds.");
+  speakAsCypher("Downloading new model weights now, Boss. Please check your notification drawer.");
+  if (window.AndroidInterface && typeof window.AndroidInterface.downloadModel === 'function') {
+    window.AndroidInterface.downloadModel("http://192.168.1.109:8000/cypher-1.5b-q4_0.gguf");
+  }
 }
 
 function closeModal() {

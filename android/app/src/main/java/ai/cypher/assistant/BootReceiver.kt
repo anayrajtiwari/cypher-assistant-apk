@@ -19,13 +19,9 @@ class BootReceiver : BroadcastReceiver() {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || 
             intent.action == "android.intent.action.QUICKBOOT_POWERON") {
             
-            // 1. Launch Cypher Background Service
+            // 1. Launch Cypher Background Service using ContextCompat
             val serviceIntent = Intent(context, CypherBackgroundService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
-            }
+            androidx.core.content.ContextCompat.startForegroundService(context, serviceIntent)
 
             // 2. Out loud TTS Greeting: "Hello Boss!"
             tts = TextToSpeech(context) { status ->

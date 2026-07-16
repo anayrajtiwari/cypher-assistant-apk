@@ -46,14 +46,20 @@ class WakeWordDetector(
     }
 
     fun startListening() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            return
+        }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) return
         isListening = true
-        try {
-            recognizer = SpeechRecognizer.createSpeechRecognizer(context)
-            recognizer?.setRecognitionListener(listener)
-            startCapture()
-        } catch (_: Exception) {
-            isListening = false
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                recognizer?.destroy()
+                recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+                recognizer?.setRecognitionListener(listener)
+                startCapture()
+            } catch (_: Exception) {
+                isListening = false
+            }
         }
     }
 
@@ -76,12 +82,14 @@ class WakeWordDetector(
             recognizer?.destroy()
         } catch (_: Exception) {}
         if (!isListening) return
-        try {
-            recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
-                it.setRecognitionListener(listener)
-            }
-            startCapture()
-        } catch (_: Exception) {}
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            try {
+                recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
+                    it.setRecognitionListener(listener)
+                }
+                startCapture()
+            } catch (_: Exception) {}
+        }
     }
 
     fun stopListening() {

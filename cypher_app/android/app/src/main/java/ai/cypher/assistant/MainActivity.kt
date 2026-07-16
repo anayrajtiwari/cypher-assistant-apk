@@ -94,8 +94,9 @@ class MainActivity : ComponentActivity() {
             } else {
                 startService(intent)
             }
-        } catch (_: Exception) {}
-        finish()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }
 

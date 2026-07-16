@@ -23,10 +23,18 @@ class CypherBackgroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         try {
             val notification = buildNotification()
-            startForeground(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                var type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+                }
+                startForeground(NOTIFICATION_ID, notification, type)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
             daemon?.start()
         } catch (e: Exception) {
-            stopSelf()
+            e.printStackTrace()
         }
         return START_STICKY
     }

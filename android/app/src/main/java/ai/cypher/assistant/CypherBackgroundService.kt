@@ -30,8 +30,7 @@ class CypherBackgroundService : Service() {
         private const val SAMPLE_RATE = 16000
     }
 
-    private var llamaContextId: Int = -1
-    private var llamaAndroid: org.nehuatl.llamacpp.LlamaAndroid? = null
+    private var llamaHelper: org.nehuatl.llamacpp.LlamaHelper? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -42,21 +41,36 @@ class CypherBackgroundService : Service() {
 
     private fun initLlama() {
         try {
-            llamaAndroid = org.nehuatl.llamacpp.LlamaAndroid(contentResolver)
-            val modelUri = android.net.Uri.parse("file:///sdcard/Download/cypher-1.5b-q4_0.gguf")
-            val params = mapOf<String, Any>(
-                "model" to modelUri.toString(),
-                "n_ctx" to 2048
+            val sharedFlow = kotlinx.coroutines.flow.MutableSharedFlow<org.nehuatl.llamacpp.LlamaHelper.LLMEvent>(extraBufferCapacity = 10)
+            llamaHelper = org.nehuatl.llamacpp.LlamaHelper(
+                contentResolver = contentResolver,
+                sharedFlow = sharedFlow
             )
-            val result = llamaAndroid?.startEngine(params) { token ->
-                android.util.Log.i("CypherLLM", "Token: $token")
+            
+            // Start collecting events in a background coroutine
+            kotlinx.coroutines.GlobalScope.launch {
+                sharedFlow.collect { event ->
+                    when (event) {
+                        is org.nehuatl.llamacpp.LlamaHelper.LLMEvent.Loaded -> 
+                            android.util.Log.i("CypherLLM", "Model Loaded: ${event.path}")
+                        is org.nehuatl.llamacpp.LlamaHelper.LLMEvent.Error -> 
+                            android.util.Log.e("CypherLLM", "Model Error: ${event.message}")
+                        is org.nehuatl.llamacpp.LlamaHelper.LLMEvent.Ongoing -> 
+                            android.util.Log.i("CypherLLM", "Token: ${event.word}")
+                        else -> {}
+                    }
+                }
             }
-            if (result != null) {
-                llamaContextId = result["contextId"] as Int
-                android.util.Log.i("CypherLLM", "GGUF model loaded successfully. Context ID: $llamaContextId")
+
+            // Must use file URI
+            llamaHelper?.load(
+                path = "file:///sdcard/Download/cypher-1.5b-q4_0.gguf",
+                contextLength = 2048
+            ) { contextId ->
+                android.util.Log.i("CypherLLM", "GGUF model loaded successfully. Context ID: $contextId")
             }
         } catch (e: Exception) {
-            android.util.Log.e("CypherLLM", "Failed to load GGUF model", e)
+            android.util.Log.e("CypherLLM", "Failed to init GGUF model", e)
         }
     }
 

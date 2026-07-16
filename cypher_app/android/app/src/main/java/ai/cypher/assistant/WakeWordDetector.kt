@@ -17,12 +17,13 @@ class WakeWordDetector(
     private val wakePhrases = setOf(
         "zed one eight", "zee one eight",
         "zed 18", "zee 18", "zed18", "zee18",
-        "zed one 8", "zee one 8"
     )
 
     private val listener = object : RecognitionListener {
         override fun onResults(results: Bundle?) {
-            val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+            val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: run {
+                restartListening(); return
+            }
             for (text in texts) {
                 val lower = text.lowercase().trim()
                 for (ww in wakePhrases) {
@@ -34,11 +35,7 @@ class WakeWordDetector(
             }
             restartListening()
         }
-
-        override fun onError(error: Int) {
-            restartListening()
-        }
-
+        override fun onError(error: Int) { restartListening() }
         override fun onReadyForSpeech(params: Bundle?) {}
         override fun onBeginningOfSpeech() {}
         override fun onRmsChanged(rmsdB: Float) {}
@@ -49,36 +46,50 @@ class WakeWordDetector(
     }
 
     fun startListening() {
-        if (SpeechRecognizer.isRecognitionAvailable(context).not()) return
-        recognizer = SpeechRecognizer.createSpeechRecognizer(context)
-        recognizer?.setRecognitionListener(listener)
+        if (!SpeechRecognizer.isRecognitionAvailable(context)) return
         isListening = true
-        startCapture()
+        try {
+            recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            recognizer?.setRecognitionListener(listener)
+            startCapture()
+        } catch (_: Exception) {
+            isListening = false
+        }
     }
 
     private fun startCapture() {
         if (!isListening) return
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        try {
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            }
+            recognizer?.startListening(intent)
+        } catch (_: Exception) {
+            restartListening()
         }
-        recognizer?.startListening(intent)
     }
 
     private fun restartListening() {
-        recognizer?.destroy()
+        try {
+            recognizer?.destroy()
+        } catch (_: Exception) {}
         if (!isListening) return
-        recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
-            it.setRecognitionListener(listener)
-        }
-        startCapture()
+        try {
+            recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
+                it.setRecognitionListener(listener)
+            }
+            startCapture()
+        } catch (_: Exception) {}
     }
 
     fun stopListening() {
         isListening = false
-        recognizer?.stopListening()
-        recognizer?.destroy()
+        try {
+            recognizer?.stopListening()
+            recognizer?.destroy()
+        } catch (_: Exception) {}
         recognizer = null
     }
 }

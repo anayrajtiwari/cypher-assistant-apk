@@ -23,50 +23,47 @@ import androidx.core.content.ContextCompat
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
-    private var tts: TextToSpeech? = null
-    private val requiredPermissions = mutableListOf(
+
+    private val requiredPermissions = listOfNotNull(
         Manifest.permission.RECORD_AUDIO,
         Manifest.permission.READ_PHONE_STATE,
         Manifest.permission.CALL_PHONE,
         Manifest.permission.SEND_SMS,
         Manifest.permission.READ_CONTACTS,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.CAMERA,
         Manifest.permission.POST_NOTIFICATIONS,
+        Manifest.permission.ANSWER_PHONE_CALLS,
         Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
         Manifest.permission.FOREGROUND_SERVICE_PHONE_CALL,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.POST_NOTIFICATIONS else null,
     )
+
+    private var serviceStarted = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
+    ) {
         if (hasAllPermissions()) {
-            startDaemonService()
+            startCypherService()
         } else {
-            Toast.makeText(this, "All permissions required for Cypher.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cypher needs all permissions.", Toast.LENGTH_LONG).show()
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale.US
-            }
-        }
-
         setContentView(ComposeView(this).apply {
             setContent {
                 MaterialTheme {
-                    FirstBootScreen(
-                        onContinue = { requestAllPermissions() }
-                    )
+                    FirstBootScreen(onContinue = { requestAllPermissions() })
                 }
             }
         })
 
         if (hasAllPermissions()) {
-            startDaemonService()
-            finish()
+            startCypherService()
         }
     }
 
@@ -83,27 +80,22 @@ class MainActivity : ComponentActivity() {
         if (needed.isNotEmpty()) {
             permissionLauncher.launch(needed)
         } else {
-            startDaemonService()
+            startCypherService()
         }
     }
 
-    private fun startDaemonService() {
-        val intent = Intent(this, CypherBackgroundService::class.java).apply {
-            action = "START"
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-        tts?.speak("Hello Boss. All systems online.", TextToSpeech.QUEUE_FLUSH, null, "CY_BOOT")
+    private fun startCypherService() {
+        if (serviceStarted) return
+        serviceStarted = true
+        try {
+            val intent = Intent(this, CypherBackgroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (_: Exception) {}
         finish()
-    }
-
-    override fun onDestroy() {
-        tts?.stop()
-        tts?.shutdown()
-        super.onDestroy()
     }
 }
 
@@ -120,47 +112,26 @@ fun FirstBootScreen(onContinue: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            Text("CYPHER", fontSize = 48.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00E5FF))
+            Spacer(Modifier.height(8.dp))
+            Text("An AI agent by Anay", fontSize = 14.sp, color = Color(0xFF81A1C1))
+            Spacer(Modifier.height(32.dp))
+            Text("First Boot — Permission Setup", fontSize = 18.sp, color = Color.White)
+            Spacer(Modifier.height(8.dp))
             Text(
-                text = "CYPHER",
-                fontSize = 48.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFF00E5FF)
+                "Cypher needs microphone, phone, SMS,\ncontacts, location, and camera access.",
+                fontSize = 14.sp, color = Color(0xFF81A1C1), lineHeight = 22.sp
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "An AI agent by Anay",
-                fontSize = 14.sp,
-                color = Color(0xFF81A1C1)
-            )
-            Spacer(modifier = Modifier.height(32.dp))
-            Text(
-                text = "First Boot — Permission Setup",
-                fontSize = 18.sp,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Cypher needs microphone, phone, SMS,\nand notification access to operate.",
-                fontSize = 14.sp,
-                color = Color(0xFF81A1C1),
-                lineHeight = 22.sp
-            )
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(Modifier.height(32.dp))
             Button(
                 onClick = onContinue,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF00E5FF),
                     contentColor = Color(0xFF0D1117)
                 ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
+                modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
-                Text(
-                    text = "Grant Permissions",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("Grant Permissions", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

@@ -12,7 +12,7 @@ import androidx.core.app.NotificationCompat
 
 class CypherBackgroundService : Service() {
 
-    private lateinit var daemon: CypherDaemon
+    private var daemon: CypherDaemon? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -21,38 +21,44 @@ class CypherBackgroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification()
-        startForeground(NOTIFICATION_ID, notification)
-        daemon.start()
+        try {
+            val notification = buildNotification()
+            startForeground(NOTIFICATION_ID, notification)
+            daemon?.start()
+        } catch (e: Exception) {
+            stopSelf()
+        }
         return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        daemon.stop()
+        daemon?.stop()
         super.onDestroy()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Cypher Status",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Cypher background service notification"
-                setShowBadge(false)
-            }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+            try {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "Cypher",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Cypher background service"
+                    setShowBadge(false)
+                }
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.createNotificationChannel(channel)
+            } catch (_: Exception) {}
         }
     }
 
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Cypher")
-            .setContentText("Standing by. Wake word: Zed One Eight")
+            .setContentText("Standing by")
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)

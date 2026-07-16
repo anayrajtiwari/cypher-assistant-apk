@@ -2,98 +2,79 @@ package ai.cypher.assistant
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
-import kotlinx.coroutines.*
 import java.util.Locale
 
 class CypherDaemon(private val context: Context) {
 
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var tts: TextToSpeech? = null
+    private var ttsReady = false
+    private var wakeWord: WakeWordDetector? = null
     private var isRunning = false
 
-    private lateinit var brain: CypherBrain
-    private lateinit var wakeWord: WakeWordDetector
-    private lateinit var bridge: AndroidCapabilities
-    private lateinit var telephony: TelephonyManager
-    private lateinit var permissions: PermissionManager
-    private lateinit var notificationHelper: NotificationHelper
+    val brain = CypherBrain(context)
+    val permissions = PermissionManager(context)
+    val bridge = AndroidCapabilities(context, permissions)
 
     fun start() {
         if (isRunning) return
         isRunning = true
 
+        brain.load()
+
         tts = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
+            ttsReady = status == TextToSpeech.SUCCESS
+            if (ttsReady) {
                 tts?.language = Locale.US
                 speak("Hello Boss. All systems operational and standing by.")
             }
         }
 
-        brain = CypherBrain(context)
-        permissions = PermissionManager(context)
-        bridge = AndroidCapabilities(context, permissions)
-        telephony = TelephonyManager(context, bridge)
-        notificationHelper = NotificationHelper(context)
-
-        wakeWord = WakeWordDetector(
-            context = context,
-            onWake = { onWakeDetected() }
-        )
-
-        brain.load()
-        notificationHelper.send("Cypher Online", "Standing by. Wake word: Zed One Eight")
-        wakeWord.startListening()
+        try {
+            wakeWord = WakeWordDetector(context) {
+                speak("At your service, Boss.")
+                try {
+                    val stt = STTEngine(context)
+                    val text = stt.transcribe(timeoutMs = 7000)
+                    if (text.isNotBlank()) {
+                        handleCommand(text)
+                    }
+                } catch (_: Exception) {
+                    speak("I had trouble hearing you, Boss.")
+                }
+            }
+            wakeWord?.startListening()
+        } catch (_: Exception) {
+            speak("Wake word system unavailable, Boss.")
+        }
     }
 
     fun stop() {
         isRunning = false
-        scope.cancel()
-        wakeWord.stopListening()
+        wakeWord?.stopListening()
         tts?.stop()
         tts?.shutdown()
     }
 
-    private fun speak(text: String) {
-        tts?.speak(text, TextToSpeech.QUEUE_ADD, null, text)
-    }
-
-    private fun onWakeDetected() {
-        speak("At your service, Boss.")
-        scope.launch {
-            notificationHelper.update("Listening...")
-
-            val stt = STTEngine(context)
-            val text = stt.transcribe(timeoutMs = 7000)
-            if (text.isBlank()) {
-                speak("I didn't catch that, Boss.")
-                notificationHelper.update("Standing by")
-                return@launch
-            }
-
-            handleCommand(text)
-            notificationHelper.update("Standing by")
+    fun speak(text: String) {
+        if (ttsReady) {
+            tts?.speak(text, TextToSpeech.QUEUE_ADD, null, text)
         }
     }
 
-    private suspend fun handleCommand(userText: String) {
+    private fun handleCommand(userText: String) {
         val tools = bridge.getToolDefinitions()
-        var response = brain.generate(userText, tools)
+        val response = brain.generate(userText, tools)
 
-        repeat(3) {
-            val (toolName, toolArgs) = parseToolCall(response)
-            if (toolName == null) {
-                speak(response)
-                return
-            }
-
+        val (toolName, toolArgs) = parseToolCall(response)
+        if (toolName != null) {
             if (!permissions.checkToolPermission(toolName, toolArgs)) {
-                speak("Boss declined the $toolName operation.")
+                speak("Permission denied, Boss.")
                 return
             }
-
             val result = bridge.executeTool(toolName, toolArgs)
             speak(result)
-            return
+        } else {
+            speak(response)
         }
     }
 

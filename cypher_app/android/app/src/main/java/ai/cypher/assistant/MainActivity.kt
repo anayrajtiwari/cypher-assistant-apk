@@ -32,10 +32,7 @@ class MainActivity : ComponentActivity() {
         Manifest.permission.READ_CONTACTS,
         Manifest.permission.ACCESS_FINE_LOCATION,
         Manifest.permission.CAMERA,
-        Manifest.permission.POST_NOTIFICATIONS,
         Manifest.permission.ANSWER_PHONE_CALLS,
-        Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
-        Manifest.permission.FOREGROUND_SERVICE_PHONE_CALL,
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.POST_NOTIFICATIONS else null,
     )
 

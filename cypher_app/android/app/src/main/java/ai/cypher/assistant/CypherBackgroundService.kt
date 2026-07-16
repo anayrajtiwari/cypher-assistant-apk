@@ -30,7 +30,7 @@ class CypherBackgroundService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
             daemon?.start()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             e.printStackTrace()
         }
         return START_STICKY

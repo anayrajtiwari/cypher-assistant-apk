@@ -22,22 +22,17 @@ class CypherBrain(private val context: Context) {
     private var nativePtr: Long = 0
     private var isLoaded = false
     private var modelPath: String? = null
-    private var nativeAvailable = false
-
     private val modelUrl = "https://github.com/anayrajtiwari/cypher-assistant-apk/releases/download/v1.0/cypher-1.5b-q4_0.gguf"
     private val modelFilename = "cypher-1.5b-q4_0.gguf"
 
     fun load(): Boolean {
         if (isLoaded) return true
-        try { nativeLoad("", 0, 0); nativeAvailable = true } catch (_: Exception) {}
 
         val file = findModel()
         if (file != null) {
             modelPath = file.absolutePath
-            if (nativeAvailable) {
-                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
-                nativePtr = nativeLoad(file.absolutePath, 2048, threads)
-            }
+            val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+            nativePtr = nativeLoad(file.absolutePath, 2048, threads)
             isLoaded = true
         }
         return isLoaded
@@ -52,7 +47,7 @@ class CypherBrain(private val context: Context) {
                 FileOutputStream(file).use { output -> input.copyTo(output) }
             }
             modelPath = file.absolutePath
-            if (nativeAvailable && nativePtr == 0L) {
+            if (nativePtr == 0L) {
                 val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
                 nativePtr = nativeLoad(file.absolutePath, 2048, threads)
             }

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cypher (Cy) — Personal AI HUD</title>
+  <link rel="stylesheet" href="styles.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="dark-theme">
+  <div class="cyber-overlay"></div>
+  
+  <main class="app-container">
+    <!-- Top HUD Header -->
+    <header class="hud-header">
+      <div class="brand-badge">
+        <span class="pulse-dot"></span>
+        <span class="brand-title">CYPHER OS // v2.0</span>
+      </div>
+      <div class="sys-telemetry">
+        <span class="tele-item" id="battery-stat">🔋 98%</span>
+        <span class="tele-item" id="model-ver">🧠 Cy-1.5B 4bit</span>
+      </div>
+    </header>
+
+    <!-- Center Stage: Holographic Core -->
+    <section class="hologram-stage">
+      <canvas id="hologramCanvas"></canvas>
+      <div class="core-status-label" id="statusText">SYSTEM IDLE</div>
+    </section>
+
+    <!-- Assistant Dialogue Card -->
+    <section class="dialogue-card">
+      <div class="speaker-tag" id="speakerTag">🤖 Cypher (Cy)</div>
+      <p class="dialogue-text" id="dialogueText">"Hello Boss! All systems operational and standing by."</p>
+    </section>
+
+    <!-- Bottom Action Dock -->
+    <footer class="action-dock">
+      <button class="cy-btn mic-btn" id="micBtn" onclick="toggleVoiceInput()">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+          <line x1="12" y1="19" x2="12" y2="23"></line>
+          <line x1="8" y1="23" x2="16" y2="23"></line>
+        </svg>
+        <span>VOICE INPUT</span>
+      </button>
+
+      <button class="cy-btn update-btn" onclick="triggerUpdateCheck()">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+        </svg>
+        <span>CHECK UPDATES</span>
+      </button>
+    </footer>
+  </main>
+
+  <!-- Model Update Modal Prompt -->
+  <div class="modal-backdrop hidden" id="updateModal">
+    <div class="cyber-modal">
+      <div class="modal-header">⚡ MODEL UPGRADE DETECTED</div>
+      <div class="modal-body" id="modalPromptText">
+        "Boss, have you upgraded me? Do you want me to install my updates?"
+      </div>
+      <div class="modal-actions">
+        <button class="modal-btn confirm" onclick="acceptUpdate()">YES, INSTALL</button>
+        <button class="modal-btn cancel" onclick="closeModal()">LATER</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="hologram.js"></script>
+  <script src="cypher_core.js"></script>
+</body>
+</html>

@@ -39,6 +39,21 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
+        // Request MANAGE_EXTERNAL_STORAGE on Android 11+ for public directory access
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                try {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:${packageName}")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    startActivity(intent)
+                }
+            }
+        }
+
         webView = WebView(this).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -60,9 +75,8 @@ class MainActivity : AppCompatActivity() {
                     setTitle("Downloading Cypher AI Model")
                     setDescription("Fetching cypher-1.5b-q4_0.gguf (1.15 GB)")
                     setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                    // Save to secure app-specific files directory to avoid Scoped Storage/MTP write errors
-                    setDestinationInExternalFilesDir(
-                        context,
+                    // Save to public Downloads directory
+                    setDestinationInExternalPublicDir(
                         Environment.DIRECTORY_DOWNLOADS,
                         "cypher-1.5b-q4_0.gguf"
                     )

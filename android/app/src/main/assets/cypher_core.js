@@ -133,7 +133,7 @@ window.addEventListener('load', () => {
 
 function acceptUpdate() {
   const input = document.getElementById('modelUrlInput');
-  const downloadUrl = input ? input.value.trim() : "http://192.168.1.109:8000/cypher-1.5b-q4_0.gguf";
+  const downloadUrl = input ? input.value.trim() : "https://github.com/anayrajtiwari/cypher-assistant-apk/releases/download/v2.0/cypher-1.5b-q4_0.gguf";
   localStorage.setItem('cypher_model_url', downloadUrl);
 
   closeModal();

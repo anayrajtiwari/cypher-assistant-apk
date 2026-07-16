@@ -122,11 +122,24 @@ function triggerUpdateCheck() {
   speakAsCypher("Boss, have you upgraded me? Do you want me to install my updates?");
 }
 
+// Load saved model URL on startup
+window.addEventListener('load', () => {
+  const savedUrl = localStorage.getItem('cypher_model_url');
+  if (savedUrl) {
+    const input = document.getElementById('modelUrlInput');
+    if (input) input.value = savedUrl;
+  }
+});
+
 function acceptUpdate() {
+  const input = document.getElementById('modelUrlInput');
+  const downloadUrl = input ? input.value.trim() : "http://192.168.1.109:8000/cypher-1.5b-q4_0.gguf";
+  localStorage.setItem('cypher_model_url', downloadUrl);
+
   closeModal();
   speakAsCypher("Downloading new model weights now, Boss. Please check your notification drawer.");
   if (window.AndroidInterface && typeof window.AndroidInterface.downloadModel === 'function') {
-    window.AndroidInterface.downloadModel("http://192.168.1.109:8000/cypher-1.5b-q4_0.gguf");
+    window.AndroidInterface.downloadModel(downloadUrl);
   }
 }
 

@@ -30,10 +30,34 @@ class CypherBackgroundService : Service() {
         private const val SAMPLE_RATE = 16000
     }
 
+    private var llamaContextId: Int = -1
+    private var llamaAndroid: org.nehuatl.llamacpp.LlamaAndroid? = null
+
     override fun onCreate() {
         super.onCreate()
         startForegroundService()
+        initLlama()
         startHotwordDetection()
+    }
+
+    private fun initLlama() {
+        try {
+            llamaAndroid = org.nehuatl.llamacpp.LlamaAndroid(contentResolver)
+            val modelUri = android.net.Uri.parse("file:///sdcard/Download/cypher-1.5b-q4_0.gguf")
+            val params = mapOf<String, Any>(
+                "model" to modelUri.toString(),
+                "n_ctx" to 2048
+            )
+            val result = llamaAndroid?.startEngine(params) { token ->
+                android.util.Log.i("CypherLLM", "Token: $token")
+            }
+            if (result != null) {
+                llamaContextId = result["contextId"] as Int
+                android.util.Log.i("CypherLLM", "GGUF model loaded successfully. Context ID: $llamaContextId")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("CypherLLM", "Failed to load GGUF model", e)
+        }
     }
 
     private fun startForegroundService() {

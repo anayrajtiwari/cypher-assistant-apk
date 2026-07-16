@@ -24,6 +24,8 @@ android {
         }
     }
 
+    aaptOptions { noCompress += listOf("gguf") }
+
     buildFeatures { compose = true }
 
     composeOptions { kotlinCompilerExtensionVersion = "1.5.10" }

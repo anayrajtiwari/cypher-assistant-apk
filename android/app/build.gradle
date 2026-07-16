@@ -39,9 +39,10 @@ dependencies {
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.webkit:webkit:1.9.0'
     implementation('io.github.ljcamargo:llamacpp-kotlin:0.4.0') {
-        exclude group: 'androidx.core', module: 'core-ktx'
-        exclude group: 'androidx.appcompat', module: 'appcompat'
-        exclude group: 'com.google.android.material', module: 'material'
+        exclude group: 'androidx.core'
+        exclude group: 'androidx.appcompat'
+        exclude group: 'com.google.android.material'
+        exclude group: 'org.jetbrains.kotlin'
     }
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 }

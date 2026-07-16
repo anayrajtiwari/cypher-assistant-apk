@@ -12,8 +12,9 @@ cypher_app/android/gradle/wrapper/gradle-wrapper.jar
 **/*.pyc
 cypher_android_pack/cypher/**/__pycache__/
 
-# Model files (too large for git)
+# Model files (too large for git — downloaded by CI)
 *.gguf
+!/cypher_app/android/app/src/main/assets/models/*.gguf
 
 # Data
 cypher_app/android/app/cypher.jks

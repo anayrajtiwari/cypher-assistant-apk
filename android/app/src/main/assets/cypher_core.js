@@ -1,27 +1,58 @@
 /**
- * Cypher App Core Engine — Speech, Auto-Start Greeting & Model Update Receiver
+ * Cypher App Core Engine — Speech, Real Native LLM Integration & UI Receiver
  */
 
 let synth = window.speechSynthesis;
 let recognition = null;
 let isListening = false;
+let currentStreamingText = "";
 
 window.addEventListener('load', () => {
-  console.log("⚡ [Cy OS App] Initialized.");
+  console.log("⚡ [Cy OS App] Native Bridge Initialized.");
   
-  // Auto-Start Greeting on launch / Android OS boot
+  // Auto-Start Greeting on launch
   setTimeout(() => {
-    speakAsCypher("Hello Boss! All systems operational and standing by.");
+    speakAsCypher("Hello Boss! Neural core initializing. Standing by.");
   }, 800);
-
-  // Check for model upgrades (e.g. new GGUF file copied)
-  checkForModelUpdates();
 });
+
+// Native Event Listener called from MainActivity.kt BroadcastReceiver
+window.onNativeLLMEvent = function(type, data) {
+  console.log("⚡ [Native Event]:", type, data);
+  const statusEl = document.getElementById('statusText');
+  const dialogueEl = document.getElementById('dialogueText');
+
+  if (type === "STATUS_UPDATE") {
+    if (statusEl) statusEl.innerText = data;
+    if (data.includes("ONLINE") || data.includes("LOADED")) {
+      speakAsCypher("Local GGUF Model loaded successfully, Boss! I am online.");
+    } else if (data.includes("missing") || data.includes("missing")) {
+      speakAsCypher("Model file missing. Please use the Check Updates button to download it.");
+    }
+  } else if (type === "STREAM_START") {
+    currentStreamingText = "";
+    if (statusEl) statusEl.innerText = "THINKING...";
+    if (dialogueEl) dialogueEl.innerText = '"..."';
+    if (window.setHologramSpeaking) window.setHologramSpeaking(true);
+  } else if (type === "STREAM_TOKEN") {
+    currentStreamingText += data;
+    if (dialogueEl) dialogueEl.innerText = `"${currentStreamingText}"`;
+  } else if (type === "STREAM_END") {
+    if (statusEl) statusEl.innerText = "SYSTEM IDLE";
+    if (window.setHologramSpeaking) window.setHologramSpeaking(false);
+    if (currentStreamingText.trim().length > 0) {
+      speakTextOnly(currentStreamingText);
+    }
+  }
+};
 
 function speakAsCypher(text) {
   const dialogueEl = document.getElementById('dialogueText');
   if (dialogueEl) dialogueEl.innerText = `"${text}"`;
+  speakTextOnly(text);
+}
 
+function speakTextOnly(text) {
   if ('speechSynthesis' in window) {
     synth.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -58,7 +89,7 @@ function toggleVoiceInput() {
 function startListening() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    speakAsCypher("Voice recognition not supported on this browser version, Boss.");
+    speakAsCypher("Voice recognition not supported on this device, Boss.");
     return;
   }
 
@@ -93,43 +124,22 @@ function stopListening() {
 }
 
 function processBossCommand(cmd) {
-  const lower = cmd.toLowerCase();
-  
-  if (lower.includes("hello") || lower.includes("hey")) {
-    speakAsCypher("Hello Boss! How may I assist you today?");
-  } else if (lower.includes("upgrade") || lower.includes("update")) {
-    triggerUpdateCheck();
-  } else {
-    speakAsCypher(`Received command: "${cmd}". Executing, Boss.`);
-  }
-}
+  const dialogueEl = document.getElementById('dialogueText');
+  if (dialogueEl) dialogueEl.innerText = `"${cmd}"`;
 
-function checkForModelUpdates() {
-  // Simulate model file detection trigger
-  const newModelFound = true; // Set to true to showcase modal prompt
-  if (newModelFound) {
-    setTimeout(() => {
-      const modal = document.getElementById('updateModal');
-      if (modal) modal.classList.remove('hidden');
-      speakAsCypher("Boss, have you upgraded me? Do you want me to install my updates?");
-    }, 2500);
+  // Dispatch directly to Native GGUF Llama engine via AndroidInterface
+  if (window.AndroidInterface && typeof window.AndroidInterface.sendPromptToCypher === 'function') {
+    window.AndroidInterface.sendPromptToCypher(cmd);
+  } else {
+    speakAsCypher(`Received: "${cmd}". Android native interface unavailable.`);
   }
 }
 
 function triggerUpdateCheck() {
   const modal = document.getElementById('updateModal');
   if (modal) modal.classList.remove('hidden');
-  speakAsCypher("Boss, have you upgraded me? Do you want me to install my updates?");
+  speakAsCypher("Boss, do you want to download or re-sync the model weights?");
 }
-
-// Load saved model URL on startup
-window.addEventListener('load', () => {
-  const savedUrl = localStorage.getItem('cypher_model_url');
-  if (savedUrl) {
-    const input = document.getElementById('modelUrlInput');
-    if (input) input.value = savedUrl;
-  }
-});
 
 function acceptUpdate() {
   const input = document.getElementById('modelUrlInput');
@@ -137,7 +147,7 @@ function acceptUpdate() {
   localStorage.setItem('cypher_model_url', downloadUrl);
 
   closeModal();
-  speakAsCypher("Downloading new model weights now, Boss. Please check your notification drawer.");
+  speakAsCypher("Downloading model weights to public Download folder now, Boss.");
   if (window.AndroidInterface && typeof window.AndroidInterface.downloadModel === 'function') {
     window.AndroidInterface.downloadModel(downloadUrl);
   }

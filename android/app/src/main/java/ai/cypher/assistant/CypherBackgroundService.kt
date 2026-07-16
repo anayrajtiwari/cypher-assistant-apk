@@ -10,85 +10,54 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
+import android.os.Environment
 import android.os.IBinder
+import android.os.ParcelFileDescriptor
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
+import org.nehuatl.llamacpp.LlamaAndroid
+import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-/**
- * Cypher Foreground Service (FGS)
- * Targets API 33 (Android 13) to allow microphone recording while running in the background.
- * Optimized for low idle CPU/battery consumption during standby.
- */
 class CypherBackgroundService : Service() {
 
     private val isRunning = AtomicBoolean(false)
     private var recordingThread: Thread? = null
+    private var llamaAndroid: LlamaAndroid? = null
+    private var llamaContextId: Int = -1
+    private var isModelLoaded = false
 
     companion object {
         private const val CHANNEL_ID = "cypher_channel"
         private const val NOTIFICATION_ID = 1
         private const val SAMPLE_RATE = 16000
+        var instance: CypherBackgroundService? = null
     }
-
-    private var llamaHelper: org.nehuatl.llamacpp.LlamaHelper? = null
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         startForegroundService()
-        initLlama()
+        initLlamaEngine()
         startHotwordDetection()
-    }
-
-    private fun initLlama() {
-        try {
-            val sharedFlow = kotlinx.coroutines.flow.MutableSharedFlow<org.nehuatl.llamacpp.LlamaHelper.LLMEvent>(extraBufferCapacity = 10)
-            llamaHelper = org.nehuatl.llamacpp.LlamaHelper(
-                contentResolver = contentResolver,
-                sharedFlow = sharedFlow
-            )
-            
-            // Start collecting events in a background coroutine
-            kotlinx.coroutines.GlobalScope.launch {
-                sharedFlow.collect { event ->
-                    when (event) {
-                        is org.nehuatl.llamacpp.LlamaHelper.LLMEvent.Loaded -> 
-                            android.util.Log.i("CypherLLM", "Model Loaded: ${event.path}")
-                        is org.nehuatl.llamacpp.LlamaHelper.LLMEvent.Error -> 
-                            android.util.Log.e("CypherLLM", "Model Error: ${event.message}")
-                        is org.nehuatl.llamacpp.LlamaHelper.LLMEvent.Ongoing -> 
-                            android.util.Log.i("CypherLLM", "Token: ${event.word}")
-                        else -> {}
-                    }
-                }
-            }
-
-            // Must use file URI
-            llamaHelper?.load(
-                path = "file:///sdcard/Download/cypher-1.5b-q4_0.gguf",
-                contextLength = 2048
-            ) { contextId ->
-                android.util.Log.i("CypherLLM", "GGUF model loaded successfully. Context ID: $contextId")
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("CypherLLM", "Failed to init GGUF model", e)
-        }
     }
 
     private fun startForegroundService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Cypher OS Service",
+                "Cypher OS Agent Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Cypher background audio listener & agent service"
+                description = "Cypher local AI engine active"
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager?.createNotificationChannel(channel)
         }
 
-        // Open app when clicking the notification
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
@@ -96,14 +65,116 @@ class CypherBackgroundService : Service() {
         )
 
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Cypher OS Active")
-            .setContentText("Listening for 'zed_one_eight' wake command...")
+            .setContentTitle("Cypher OS AI Engaged")
+            .setContentText("Offline GGUF Engine Active")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
 
         startForeground(NOTIFICATION_ID, notification)
+    }
+
+    private fun findModelFile(): File? {
+        val candidates = listOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "cypher-1.5b-q4_0.gguf"),
+            File("/sdcard/Download/cypher-1.5b-q4_0.gguf"),
+            File("/storage/emulated/0/Download/cypher-1.5b-q4_0.gguf"),
+            File(getExternalFilesDir(null), "cypher-1.5b-q4_0.gguf"),
+            File(filesDir, "cypher-1.5b-q4_0.gguf")
+        )
+        for (f in candidates) {
+            if (f.exists() && f.length() > 50000000L) { // >50MB check
+                Log.i("CypherLLM", "Found GGUF model file at: ${f.absolutePath} (${f.length()} bytes)")
+                return f
+            }
+        }
+        return null
+    }
+
+    fun initLlamaEngine() {
+        if (isModelLoaded) return
+
+        GlobalScope.launch(Dispatchers.IO) {
+            val modelFile = findModelFile()
+            if (modelFile == null) {
+                Log.e("CypherLLM", "No valid GGUF model file found in Download directories")
+                notifyUI("STATUS_UPDATE", "Model file missing in Downloads!")
+                return@launch
+            }
+
+            try {
+                notifyUI("STATUS_UPDATE", "Loading local GGUF model into memory...")
+                val pfd = ParcelFileDescriptor.open(modelFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                val fd = pfd.detachFd()
+
+                val engine = LlamaAndroid(contentResolver)
+                llamaAndroid = engine
+
+                val config = mapOf<String, Any>(
+                    "model" to modelFile.absolutePath,
+                    "model_fd" to fd,
+                    "use_mmap" to true,
+                    "use_mlock" to false,
+                    "n_ctx" to 2048,
+                    "n_batch" to 512,
+                    "n_threads" to 4,
+                    "n_gpu_layers" to 0
+                )
+
+                val res = engine.startEngine(config) { token ->
+                    notifyUI("STREAM_TOKEN", token)
+                }
+
+                if (res != null && res.containsKey("contextId")) {
+                    llamaContextId = (res["contextId"] as Number).toInt()
+                    isModelLoaded = true
+                    Log.i("CypherLLM", "GGUF Model initialized successfully! Context ID: $llamaContextId")
+                    notifyUI("STATUS_UPDATE", "SYSTEM ONLINE // MODEL LOADED")
+                } else {
+                    Log.e("CypherLLM", "startEngine returned null context")
+                    notifyUI("STATUS_UPDATE", "Engine Initialization Failed")
+                }
+            } catch (e: Exception) {
+                Log.e("CypherLLM", "Error initializing GGUF engine", e)
+                notifyUI("STATUS_UPDATE", "LLM Error: ${e.message}")
+            }
+        }
+    }
+
+    fun generateResponse(prompt: String) {
+        if (!isModelLoaded || llamaContextId == -1) {
+            notifyUI("STATUS_UPDATE", "Model not loaded. Attempting load...")
+            initLlamaEngine()
+            return
+        }
+
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                notifyUI("STREAM_START", "")
+                val formattedPrompt = "<|user|>\n$prompt<|end|>\n<|assistant|>\n"
+                val params = mapOf<String, Any>(
+                    "prompt" to formattedPrompt,
+                    "emit_partial_completion" to true,
+                    "temperature" to 0.7,
+                    "n_predict" to 256
+                )
+                llamaAndroid?.launchCompletion(llamaContextId, params)
+                notifyUI("STREAM_END", "")
+            } catch (e: Exception) {
+                Log.e("CypherLLM", "Completion error", e)
+                notifyUI("STREAM_TOKEN", " [Error generating response]")
+                notifyUI("STREAM_END", "")
+            }
+        }
+    }
+
+    private fun notifyUI(type: String, data: String) {
+        val intent = Intent("ai.cypher.assistant.LLM_EVENT").apply {
+            putExtra("type", type)
+            putExtra("data", data)
+        }
+        sendBroadcast(intent)
     }
 
     private fun startHotwordDetection() {
@@ -130,23 +201,16 @@ class CypherBackgroundService : Service() {
                     val buffer = ShortArray(bufferSize)
 
                     while (isRunning.get()) {
-                        // Low battery drain idle loop: Read audio blocks
                         val read = record.read(buffer, 0, buffer.size)
                         if (read > 0) {
-                            // [Placeholder] Feed PCM buffer into low-power wake-word engine (e.g. OpenWakeWord / Porcupine)
-                            // Detect phrase: "zed_one_eight" / "zee_one_eight"
-                            
-                            // Sleep briefly to prevent CPU thread thrashing and conserve battery
                             Thread.sleep(100)
                         }
                     }
                     record.stop()
                     record.release()
                 }
-            } catch (e: SecurityException) {
-                // Handle permission not granted
             } catch (e: Exception) {
-                // Log other exceptions
+                Log.e("CypherService", "Hotword error", e)
             }
         }.apply {
             priority = Thread.NORM_PRIORITY
@@ -155,12 +219,19 @@ class CypherBackgroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!isModelLoaded) {
+            initLlamaEngine()
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
         isRunning.set(false)
         recordingThread?.interrupt()
+        if (llamaContextId != -1) {
+            llamaAndroid?.releaseContext(llamaContextId)
+        }
+        instance = null
         super.onDestroy()
     }
 

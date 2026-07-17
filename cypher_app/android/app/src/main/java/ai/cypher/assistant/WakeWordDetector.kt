@@ -24,29 +24,30 @@ class WakeWordDetector(
     private val isPaused = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val wakePhrases = setOf(
-        "zed one eight", "zee one eight",
-        "zed 18", "zee 18", "zed18", "zee18",
-    )
-
     private val listener = object : RecognitionListener {
         override fun onResults(results: Bundle?) {
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             if (texts.isNullOrEmpty()) {
+                Log.w(TAG, "onResults: null or empty results, restarting")
                 restartListening()
                 return
             }
-            for (text in texts) {
-                val lower = text.lowercase().trim()
-                for (ww in wakePhrases) {
-                    if (lower.contains(ww)) {
-                        Log.i(TAG, "Wake word detected in: \"$text\"")
-                        onWake()
-                        return
-                    }
+
+            Log.i(TAG, "onResults received ${texts.size} candidates")
+            for ((i, text) in texts.withIndex()) {
+                val normalized = normalize(text)
+                Log.i(TAG, "  [$i] raw=\"$text\" normalized=\"$normalized\"")
+
+                if (isWakeWordMatch(normalized)) {
+                    Log.i(TAG, "*** WAKE WORD DETECTED in \"$text\" (normalized=\"$normalized\") ***")
+                    isPaused.set(true)
+                    onWake()
+                    return
                 }
             }
+
             if (isActive.get() && !isPaused.get()) {
+                Log.d(TAG, "No wake word match in any candidate, restarting")
                 restartListening()
             }
         }
@@ -64,53 +65,64 @@ class WakeWordDetector(
                 SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "ERROR_SPEECH_TIMEOUT"
                 else -> "ERROR_UNKNOWN($error)"
             }
-            Log.w(TAG, "SpeechRecognizer error: $errorMsg")
+            Log.w(TAG, "SpeechRecognizer error: $errorMsg (code=$error)")
             if (isActive.get() && !isPaused.get()) {
                 restartListening()
             }
         }
 
-        override fun onReadyForSpeech(params: Bundle?) {}
-        override fun onBeginningOfSpeech() {}
+        override fun onReadyForSpeech(params: Bundle?) {
+            Log.d(TAG, "onReadyForSpeech")
+        }
+        override fun onBeginningOfSpeech() {
+            Log.d(TAG, "onBeginningOfSpeech")
+        }
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
-        override fun onEndOfSpeech() {}
-        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEndOfSpeech() {
+            Log.d(TAG, "onEndOfSpeech")
+        }
+        override fun onPartialResults(partialResults: Bundle?) {
+            val texts = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            if (!texts.isNullOrEmpty()) {
+                Log.d(TAG, "onPartialResults: \"${texts[0]}\"")
+            }
+        }
         override fun onEvent(eventType: Int, params: Bundle?) {}
     }
 
     fun startListening() {
         if (!isActive.compareAndSet(false, true)) {
-            Log.i(TAG, "Already listening")
+            Log.i(TAG, "startListening: already active, skipping")
             return
         }
         isPaused.set(false)
-
+        Log.i(TAG, "startListening: beginning wake-word detection")
         checkPermissionAndStart()
     }
 
     fun pauseListening() {
-        Log.i(TAG, "Pausing wake word detection")
+        Log.i(TAG, "pauseListening: pausing wake-word detection")
         isPaused.set(true)
         try {
             recognizer?.stopListening()
         } catch (e: Exception) {
-            Log.e(TAG, "Error pausing recognizer", e)
+            Log.e(TAG, "pauseListening: error stopping recognizer", e)
         }
     }
 
     fun resumeListening() {
         if (!isActive.get()) {
-            Log.i(TAG, "Not active, cannot resume")
+            Log.i(TAG, "resumeListening: not active, ignoring")
             return
         }
-        Log.i(TAG, "Resuming wake word detection")
+        Log.i(TAG, "resumeListening: resuming wake-word detection")
         isPaused.set(false)
         restartListening()
     }
 
     fun stopListening() {
-        Log.i(TAG, "Stopping wake word detection")
+        Log.i(TAG, "stopListening: stopping wake-word detection")
         isActive.set(false)
         isPaused.set(false)
         mainHandler.post {
@@ -118,9 +130,10 @@ class WakeWordDetector(
                 recognizer?.stopListening()
                 recognizer?.destroy()
             } catch (e: Exception) {
-                Log.e(TAG, "Error stopping recognizer", e)
+                Log.e(TAG, "stopListening: error destroying recognizer", e)
             }
             recognizer = null
+            Log.i(TAG, "stopListening: recognizer destroyed")
         }
     }
 
@@ -129,12 +142,12 @@ class WakeWordDetector(
         if (androidx.core.content.ContextCompat.checkSelfPermission(context, permission)
             != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
-            Log.w(TAG, "RECORD_AUDIO permission not granted")
+            Log.w(TAG, "checkPermissionAndStart: RECORD_AUDIO not granted")
             isActive.set(false)
             return
         }
         if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            Log.w(TAG, "Speech recognition not available on device")
+            Log.w(TAG, "checkPermissionAndStart: speech recognition not available")
             isActive.set(false)
             return
         }
@@ -152,9 +165,10 @@ class WakeWordDetector(
         try {
             recognizer = SpeechRecognizer.createSpeechRecognizer(context)
             recognizer?.setRecognitionListener(listener)
+            Log.d(TAG, "createAndStartRecognizer: recognizer created")
             startCapture()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create speech recognizer", e)
+            Log.e(TAG, "createAndStartRecognizer: failed to create recognizer", e)
             if (isActive.get() && !isPaused.get()) {
                 mainHandler.postDelayed({ restartListening() }, 2000)
             }
@@ -162,7 +176,10 @@ class WakeWordDetector(
     }
 
     private fun startCapture() {
-        if (!isActive.get() || isPaused.get()) return
+        if (!isActive.get() || isPaused.get()) {
+            Log.d(TAG, "startCapture: skipping (active=$isActive paused=$isPaused)")
+            return
+        }
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
@@ -170,8 +187,9 @@ class WakeWordDetector(
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             }
             recognizer?.startListening(intent)
+            Log.i(TAG, "startCapture: listening started")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start capture", e)
+            Log.e(TAG, "startCapture: failed to start listening", e)
             if (isActive.get() && !isPaused.get()) {
                 mainHandler.postDelayed({ restartListening() }, 1000)
             }
@@ -179,7 +197,11 @@ class WakeWordDetector(
     }
 
     private fun restartListening() {
-        if (!isActive.get() || isPaused.get()) return
+        if (!isActive.get() || isPaused.get()) {
+            Log.d(TAG, "restartListening: skipping (active=$isActive paused=$isPaused)")
+            return
+        }
+        Log.d(TAG, "restartListening: recreating recognizer")
         mainHandler.post {
             try {
                 recognizer?.destroy()
@@ -191,9 +213,29 @@ class WakeWordDetector(
                 }
                 startCapture()
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to recreate recognizer", e)
+                Log.e(TAG, "restartListening: failed to recreate recognizer", e)
                 mainHandler.postDelayed({ restartListening() }, 2000)
             }
         }
+    }
+
+    private fun normalize(text: String): String {
+        return text.lowercase()
+            .trim()
+            .replace(Regex("[^a-z0-9 ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .replace("eighteen", "18")
+            .replace("one eight", "1 8")
+            .replace("eight", "8")
+            .replace("one", "1")
+            .replace("zed", "z")
+            .replace("zee", "z")
+    }
+
+    private fun isWakeWordMatch(normalized: String): Boolean {
+        return normalized.contains("z 18") ||
+               normalized.contains("z 1 8") ||
+               normalized.contains("z18")
     }
 }

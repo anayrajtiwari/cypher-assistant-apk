@@ -55,7 +55,7 @@ class CypherBackgroundService : Service() {
         return try {
             val notification = buildNotification()
             if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIFICATION_ID, notification, android.content.Context.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, notification)
             } else {

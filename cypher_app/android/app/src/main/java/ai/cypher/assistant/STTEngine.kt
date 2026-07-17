@@ -21,7 +21,7 @@ class STTEngine(private val context: Context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    suspend fun transcribe(timeoutMs: Long = 7000): String {
+    suspend fun transcribe(timeoutMs: Long = 8000): String {
         return withTimeout(timeoutMs) {
             suspendCancellableCoroutine { cont ->
                 if (cont.isCancelled) return@suspendCancellableCoroutine
@@ -78,7 +78,6 @@ class STTEngine(private val context: Context) {
                     val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-                        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000)
                     }
                     try {
                         recognizer.startListening(intent)

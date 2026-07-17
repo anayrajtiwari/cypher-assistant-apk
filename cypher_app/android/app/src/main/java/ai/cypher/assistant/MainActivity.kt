@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.*
 
 class MainActivity : ComponentActivity() {
 
@@ -46,6 +47,8 @@ class MainActivity : ComponentActivity() {
     )
 
     private var serviceStarted = false
+    private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val updateManager by lazy { UpdateManager(this) }
 
     private val corePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -82,6 +85,7 @@ class MainActivity : ComponentActivity() {
                     CypherUI(
                         onStart = { requestCorePermissions() },
                         onGrantOptional = { requestOptionalPermissions() },
+                        onCheckUpdate = { checkForUpdate() },
                         hasCore = hasCorePermissions(),
                     )
                 }
@@ -99,6 +103,11 @@ class MainActivity : ComponentActivity() {
         if (!serviceStarted && hasCorePermissions()) {
             startCypherService()
         }
+    }
+
+    override fun onDestroy() {
+        activityScope.cancel()
+        super.onDestroy()
     }
 
     private fun hasCorePermissions(): Boolean {
@@ -153,12 +162,50 @@ class MainActivity : ComponentActivity() {
             .putBoolean(KEY_ALWAYS_ON, enabled)
             .apply()
     }
+
+    private fun checkForUpdate() {
+        activityScope.launch {
+            Toast.makeText(this@MainActivity, "Checking for updates...", Toast.LENGTH_SHORT).show()
+            try {
+                val release = withContext(Dispatchers.IO) {
+                    updateManager.checkForUpdate()
+                }
+                if (release == null) {
+                    Toast.makeText(this@MainActivity, "Could not check for updates. Check connection.", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                val current = updateManager.getCurrentVersion()
+                if (release.version == current) {
+                    Toast.makeText(this@MainActivity, "Already up to date ($current).", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                Toast.makeText(this@MainActivity, "Update available: ${release.version} (current: $current)", Toast.LENGTH_LONG).show()
+                val apk = withContext(Dispatchers.IO) {
+                    updateManager.downloadUpdate(release.apkUrl)
+                }
+                if (apk == null) {
+                    Toast.makeText(this@MainActivity, "Download failed.", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                val ok = updateManager.installApk(apk)
+                if (ok) {
+                    Toast.makeText(this@MainActivity, "Downloaded ${release.version}. Follow prompts to install.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(this@MainActivity, "Installation failed.", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Update check failed", e)
+                Toast.makeText(this@MainActivity, "Update failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 }
 
 @Composable
 fun CypherUI(
     onStart: () -> Unit,
     onGrantOptional: () -> Unit,
+    onCheckUpdate: () -> Unit,
     hasCore: Boolean,
 ) {
     Surface(
@@ -212,6 +259,16 @@ fun CypherUI(
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
                     Text("Grant Optional Permissions", fontSize = 14.sp)
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onCheckUpdate,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF81A1C1)
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("Check for Updates", fontSize = 14.sp)
                 }
             }
         }

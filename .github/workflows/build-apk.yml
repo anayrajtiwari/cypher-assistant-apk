@@ -32,15 +32,19 @@ jobs:
             "ndk;26.1.10909125" "cmake;3.22.1" 2>&1 | tail -5
           echo "NDK installed"
 
-      - name: Download & reassemble GGUF model
+      - name: Reassemble & publish full GGUF model
         run: |
-          mkdir -p app/src/main/assets/models
+          mkdir -p /tmp/gguf_chunks
           gh release download v1.0 \
             --repo anayrajtiwari/cypher-assistant-apk \
             --pattern "gguf_chunk_*" \
             --dir /tmp/gguf_chunks/
-          cat /tmp/gguf_chunks/gguf_chunk_* > app/src/main/assets/models/cypher-1.5b-q4_0.gguf
-          ls -lh app/src/main/assets/models/cypher-1.5b-q4_0.gguf
+          cat /tmp/gguf_chunks/gguf_chunk_* > /tmp/cypher-1.5b-q4_0.gguf
+          ls -lh /tmp/cypher-1.5b-q4_0.gguf
+          gh release upload v1.0 \
+            --repo anayrajtiwari/cypher-assistant-apk \
+            --clobber \
+            /tmp/cypher-1.5b-q4_0.gguf
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

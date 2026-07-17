@@ -23,13 +23,14 @@ class WakeWordDetector(
     private val isActive = AtomicBoolean(false)
     private val isPaused = AtomicBoolean(false)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var restartOnError = false
 
     private val listener = object : RecognitionListener {
         override fun onResults(results: Bundle?) {
             val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
             if (texts.isNullOrEmpty()) {
                 Log.w(TAG, "onResults: null or empty results, restarting")
-                restartListening()
+                startCapture()
                 return
             }
 
@@ -48,7 +49,7 @@ class WakeWordDetector(
 
             if (isActive.get() && !isPaused.get()) {
                 Log.d(TAG, "No wake word match in any candidate, restarting")
-                restartListening()
+                startCapture()
             }
         }
 
@@ -67,7 +68,12 @@ class WakeWordDetector(
             }
             Log.w(TAG, "SpeechRecognizer error: $errorMsg (code=$error)")
             if (isActive.get() && !isPaused.get()) {
-                restartListening()
+                if (restartOnError || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    recreateAndStart()
+                } else {
+                    restartOnError = true
+                    startCapture()
+                }
             }
         }
 
@@ -97,6 +103,7 @@ class WakeWordDetector(
             return
         }
         isPaused.set(false)
+        restartOnError = false
         Log.i(TAG, "startListening: beginning wake-word detection")
         checkPermissionAndStart()
     }
@@ -118,7 +125,7 @@ class WakeWordDetector(
         }
         Log.i(TAG, "resumeListening: resuming wake-word detection")
         isPaused.set(false)
-        restartListening()
+        startCapture()
     }
 
     fun stopListening() {
@@ -170,7 +177,7 @@ class WakeWordDetector(
         } catch (e: Exception) {
             Log.e(TAG, "createAndStartRecognizer: failed to create recognizer", e)
             if (isActive.get() && !isPaused.get()) {
-                mainHandler.postDelayed({ restartListening() }, 2000)
+                mainHandler.postDelayed({ recreateAndStart() }, 2000)
             }
         }
     }
@@ -191,31 +198,19 @@ class WakeWordDetector(
         } catch (e: Exception) {
             Log.e(TAG, "startCapture: failed to start listening", e)
             if (isActive.get() && !isPaused.get()) {
-                mainHandler.postDelayed({ restartListening() }, 1000)
+                mainHandler.postDelayed({ recreateAndStart() }, 1000)
             }
         }
     }
 
-    private fun restartListening() {
+    private fun recreateAndStart() {
         if (!isActive.get() || isPaused.get()) {
-            Log.d(TAG, "restartListening: skipping (active=$isActive paused=$isPaused)")
+            Log.d(TAG, "recreateAndStart: skipping (active=$isActive paused=$isPaused)")
             return
         }
-        Log.d(TAG, "restartListening: recreating recognizer")
+        Log.d(TAG, "recreateAndStart: recreating recognizer after error")
         mainHandler.post {
-            try {
-                recognizer?.destroy()
-            } catch (_: Exception) {}
-            recognizer = null
-            try {
-                recognizer = SpeechRecognizer.createSpeechRecognizer(context).also {
-                    it.setRecognitionListener(listener)
-                }
-                startCapture()
-            } catch (e: Exception) {
-                Log.e(TAG, "restartListening: failed to recreate recognizer", e)
-                mainHandler.postDelayed({ restartListening() }, 2000)
-            }
+            createAndStartRecognizer()
         }
     }
 

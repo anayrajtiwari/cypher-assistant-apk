@@ -30,12 +30,14 @@ class NotificationHelper(private val context: Context) {
                 if (manager.getNotificationChannel(CHANNEL_ID) == null) {
                     val channel = NotificationChannel(
                         CHANNEL_ID, CHANNEL_NAME,
-                        NotificationManager.IMPORTANCE_HIGH
+                        NotificationManager.IMPORTANCE_LOW
                     ).apply {
                         description = "Cypher action notifications"
+                        enableVibration(false)
+                        setSound(null, null)
                     }
                     manager.createNotificationChannel(channel)
-                    Log.i(TAG, "Notification channel created")
+                    Log.i(TAG, "Silent notification channel created")
                 }
                 channelCreated = true
             } catch (e: Exception) {
@@ -46,21 +48,6 @@ class NotificationHelper(private val context: Context) {
         }
     }
 
-    fun update(text: String) {
-        try {
-            val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                .setContentTitle("Cypher")
-                .setContentText(text)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-                .build()
-            manager.notify(1002, notification)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to update notification", e)
-        }
-    }
-
     fun send(title: String, content: String) {
         try {
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
@@ -68,7 +55,8 @@ class NotificationHelper(private val context: Context) {
                 .setContentTitle(title)
                 .setContentText(content)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setSilent(true)
                 .setAutoCancel(true)
                 .build()
             manager.notify(System.currentTimeMillis().toInt(), notification)

@@ -3,13 +3,16 @@ package ai.cypher.assistant
 import android.content.Context
 import android.os.Build
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.resume
 
 class CypherDaemon(private val context: Context, private val scope: CoroutineScope) {
 
@@ -23,6 +26,7 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
     private val isRunning = AtomicBoolean(false)
     private var pipelineJob: Job? = null
     private var daemonState: DaemonState = DaemonState.STOPPED
+    private var ttsListenerAttached = false
 
     val brain = CypherBrain(context)
     val permissions = PermissionManager(context)
@@ -34,6 +38,7 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
         WAKE_WORD_LISTENING,
         PROCESSING_COMMAND,
         SPEAKING,
+        LISTENING,
         ERROR
     }
 
@@ -55,6 +60,18 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
             Log.w(TAG, "Native library failed to load, continuing with rule-based responses")
         }
 
+        if (brainState == CypherBrain.BrainState.MODEL_NOT_FOUND) {
+            Log.i(TAG, "Model not found locally, starting background download")
+            scope.launch {
+                val downloaded = brain.downloadModel()
+                if (downloaded) {
+                    Log.i(TAG, "Model downloaded and loaded successfully during startup")
+                } else {
+                    Log.w(TAG, "Background model download failed, will retry on voice command")
+                }
+            }
+        }
+
         startWakeWord()
         daemonState = DaemonState.WAKE_WORD_LISTENING
         Log.i(TAG, "Daemon started, state=WAKE_WORD_LISTENING")
@@ -68,6 +85,7 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
                     ttsReady.set(ready)
                     if (ready) {
                         setMaleVoice()
+                        attachUtteranceListener()
                         Log.i(TAG, "TTS initialized successfully")
                     } else {
                         Log.w(TAG, "TTS initialization failed with status: $status")
@@ -78,6 +96,25 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
             Log.e(TAG, "TTS initialization error", e)
             ttsReady.set(false)
         }
+    }
+
+    private fun attachUtteranceListener() {
+        if (ttsListenerAttached) return
+        ttsListenerAttached = true
+        tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(uid: String) {
+                Log.d(TAG, "TTS started: $uid")
+            }
+            override fun onDone(uid: String) {
+                Log.d(TAG, "TTS done: $uid")
+            }
+            override fun onError(uid: String) {
+                Log.w(TAG, "TTS error: $uid")
+            }
+            override fun onStop(uid: String, interrupted: Boolean) {
+                Log.d(TAG, "TTS stopped: $uid interrupted=$interrupted")
+            }
+        })
     }
 
     private fun setMaleVoice() {
@@ -109,6 +146,52 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
         }
     }
 
+    suspend fun speakAndWait(text: String) {
+        if (!ttsReady.get() || tts == null) {
+            Log.w(TAG, "TTS not ready, cannot speak: $text")
+            return
+        }
+        suspendCancellableCoroutine<Unit> { cont ->
+            val utteranceId = "cypher_${System.nanoTime()}"
+            val oldListener = tts?.onUtteranceProgressListener
+            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(uid: String) {}
+                override fun onDone(uid: String) {
+                    if (uid != utteranceId) return
+                    tts?.setOnUtteranceProgressListener(oldListener)
+                    if (!cont.isCancelled) cont.resume(Unit)
+                }
+                override fun onError(uid: String) {
+                    if (uid != utteranceId) return
+                    tts?.setOnUtteranceProgressListener(oldListener)
+                    if (!cont.isCancelled) cont.resume(Unit)
+                }
+                override fun onStop(uid: String, interrupted: Boolean) {
+                    if (uid != utteranceId) return
+                    tts?.setOnUtteranceProgressListener(oldListener)
+                    if (!cont.isCancelled) cont.resume(Unit)
+                }
+            })
+            val result = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+            if (result != TextToSpeech.SUCCESS) {
+                tts?.setOnUtteranceProgressListener(oldListener)
+                if (!cont.isCancelled) cont.resume(Unit)
+            }
+        }
+    }
+
+    fun speak(text: String) {
+        if (ttsReady.get()) {
+            try {
+                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, "fire_and_forget_${System.nanoTime()}")
+            } catch (e: Exception) {
+                Log.e(TAG, "TTS speak error", e)
+            }
+        } else {
+            Log.w(TAG, "TTS not ready, cannot speak: $text")
+        }
+    }
+
     private fun startWakeWord() {
         try {
             if (wakeWord != null) {
@@ -127,7 +210,7 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
 
     private fun onWakeWordDetected() {
         if (!isRunning.get()) return
-        if (daemonState == DaemonState.PROCESSING_COMMAND) {
+        if (daemonState == DaemonState.PROCESSING_COMMAND || daemonState == DaemonState.LISTENING) {
             Log.i(TAG, "Already processing a command, ignoring wake word")
             return
         }
@@ -139,15 +222,14 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
             try {
                 pauseWakeWord()
 
-                speak("At your service, Boss.")
                 daemonState = DaemonState.SPEAKING
+                speakAndWait("At your service, Boss.")
 
+                daemonState = DaemonState.LISTENING
                 val stt = STTEngine(context)
-                val text = stt.transcribe(timeoutMs = 7000)
+                val text = stt.transcribe(timeoutMs = 8000)
                 if (text.isBlank()) {
-                    Log.w(TAG, "No speech detected")
-                    resumeWakeWord()
-                    daemonState = DaemonState.WAKE_WORD_LISTENING
+                    Log.w(TAG, "No speech detected after TTS")
                     return@launch
                 }
 
@@ -157,7 +239,7 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
 
             } catch (e: Exception) {
                 Log.e(TAG, "Pipeline error", e)
-                speak("I had trouble hearing you, Boss.")
+                speakAndWait("I had trouble hearing you, Boss.")
             } finally {
                 resumeWakeWord()
                 daemonState = DaemonState.WAKE_WORD_LISTENING
@@ -219,25 +301,13 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
         Log.i(TAG, "Daemon stopped")
     }
 
-    fun speak(text: String) {
-        if (ttsReady.get()) {
-            try {
-                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, text)
-            } catch (e: Exception) {
-                Log.e(TAG, "TTS speak error", e)
-            }
-        } else {
-            Log.w(TAG, "TTS not ready, cannot speak: $text")
-        }
-    }
-
     private fun handleCommand(userText: String) {
         val tools = bridge.getToolDefinitions()
         val response = brain.generate(userText, tools)
 
         val (toolName, toolArgs) = parseToolCall(response)
         if (toolName != null) {
-            Log.i(TAG, "Tool call detected: $toolName")
+            Log.i(TAG, "Tool call detected: $toolName args=$toolArgs")
             if (!permissions.checkToolPermission(toolName, toolArgs)) {
                 speak("Permission denied, Boss.")
                 return

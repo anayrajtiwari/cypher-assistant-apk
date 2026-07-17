@@ -2,67 +2,202 @@ package ai.cypher.assistant
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
-import kotlinx.coroutines.*
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
-class CypherDaemon(private val context: Context) {
+class CypherDaemon(private val context: Context, private val scope: CoroutineScope) {
+
+    companion object {
+        private const val TAG = "CypherDaemon"
+    }
 
     private var tts: TextToSpeech? = null
-    private var ttsReady = false
+    private val ttsReady = AtomicBoolean(false)
     private var wakeWord: WakeWordDetector? = null
-    private var isRunning = false
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val isRunning = AtomicBoolean(false)
+    private var pipelineJob: Job? = null
+    private var daemonState: DaemonState = DaemonState.STOPPED
 
     val brain = CypherBrain(context)
     val permissions = PermissionManager(context)
     val bridge = AndroidCapabilities(context, permissions)
 
+    enum class DaemonState {
+        STOPPED,
+        INITIALIZING,
+        WAKE_WORD_LISTENING,
+        PROCESSING_COMMAND,
+        SPEAKING,
+        ERROR
+    }
+
     fun start() {
-        if (isRunning) return
-        isRunning = true
-
-        brain.load()
-
-        tts = TextToSpeech(context) { status ->
-            ttsReady = status == TextToSpeech.SUCCESS
-            if (ttsReady) {
-                tts?.language = Locale.US
-                speak("Hello Boss. All systems operational and standing by.")
-            }
+        if (!isRunning.compareAndSet(false, true)) {
+            Log.i(TAG, "Daemon already running, skipping start")
+            return
         }
 
+        daemonState = DaemonState.INITIALIZING
+        Log.i(TAG, "Daemon starting")
+
+        initializeTts()
+
+        val brainState = brain.load()
+        Log.i(TAG, "Brain state after load: $brainState")
+
+        if (brainState == CypherBrain.BrainState.NATIVE_LOAD_FAILED) {
+            Log.w(TAG, "Native library failed to load, continuing with rule-based responses")
+        }
+
+        startWakeWord()
+        daemonState = DaemonState.WAKE_WORD_LISTENING
+        Log.i(TAG, "Daemon started, state=WAKE_WORD_LISTENING")
+    }
+
+    private fun initializeTts() {
         try {
-            wakeWord = WakeWordDetector(context) {
-                speak("At your service, Boss.")
-                scope.launch {
-                    try {
-                        val stt = STTEngine(context)
-                        val text = stt.transcribe(timeoutMs = 7000)
-                        if (text.isNotBlank()) {
-                            handleCommand(text)
-                        }
-                    } catch (_: Exception) {
-                        speak("I had trouble hearing you, Boss.")
+            if (tts == null) {
+                tts = TextToSpeech(context) { status ->
+                    val ready = status == TextToSpeech.SUCCESS
+                    ttsReady.set(ready)
+                    if (ready) {
+                        tts?.language = Locale.US
+                        Log.i(TAG, "TTS initialized successfully")
+                    } else {
+                        Log.w(TAG, "TTS initialization failed with status: $status")
                     }
                 }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "TTS initialization error", e)
+            ttsReady.set(false)
+        }
+    }
+
+    private fun startWakeWord() {
+        try {
+            if (wakeWord != null) {
+                Log.w(TAG, "WakeWord already exists, stopping old one first")
+                stopWakeWord()
+            }
+            wakeWord = WakeWordDetector(context) {
+                onWakeWordDetected()
+            }
             wakeWord?.startListening()
-        } catch (_: Exception) {
-            speak("Wake word system unavailable, Boss.")
+            Log.i(TAG, "Wake word detector started")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start wake word detector", e)
+        }
+    }
+
+    private fun onWakeWordDetected() {
+        if (!isRunning.get()) return
+        if (daemonState == DaemonState.PROCESSING_COMMAND) {
+            Log.i(TAG, "Already processing a command, ignoring wake word")
+            return
+        }
+
+        Log.i(TAG, "Wake word detected, starting command pipeline")
+        daemonState = DaemonState.PROCESSING_COMMAND
+        pipelineJob?.cancel()
+        pipelineJob = scope.launch {
+            try {
+                pauseWakeWord()
+
+                speak("At your service, Boss.")
+                daemonState = DaemonState.SPEAKING
+
+                val stt = STTEngine(context)
+                val text = stt.transcribe(timeoutMs = 7000)
+                if (text.isBlank()) {
+                    Log.w(TAG, "No speech detected")
+                    resumeWakeWord()
+                    daemonState = DaemonState.WAKE_WORD_LISTENING
+                    return@launch
+                }
+
+                Log.i(TAG, "Heard: \"$text\"")
+                daemonState = DaemonState.PROCESSING_COMMAND
+                handleCommand(text)
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Pipeline error", e)
+                speak("I had trouble hearing you, Boss.")
+            } finally {
+                resumeWakeWord()
+                daemonState = DaemonState.WAKE_WORD_LISTENING
+                Log.i(TAG, "Pipeline complete, returning to wake word listening")
+            }
+        }
+    }
+
+    private fun pauseWakeWord() {
+        try {
+            wakeWord?.pauseListening()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error pausing wake word", e)
+        }
+    }
+
+    private fun resumeWakeWord() {
+        try {
+            wakeWord?.resumeListening()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resuming wake word", e)
+        }
+    }
+
+    private fun stopWakeWord() {
+        try {
+            wakeWord?.stopListening()
+            wakeWord = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping wake word", e)
         }
     }
 
     fun stop() {
-        isRunning = false
-        scope.cancel()
-        wakeWord?.stopListening()
-        tts?.stop()
-        tts?.shutdown()
+        if (!isRunning.compareAndSet(true, false)) {
+            Log.i(TAG, "Daemon already stopped, skipping stop")
+            return
+        }
+
+        Log.i(TAG, "Daemon stopping")
+        daemonState = DaemonState.STOPPED
+
+        pipelineJob?.cancel()
+        pipelineJob = null
+
+        stopWakeWord()
+
+        try {
+            tts?.stop()
+            tts?.shutdown()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error shutting down TTS", e)
+        }
+        tts = null
+        ttsReady.set(false)
+
+        brain.unload()
+
+        Log.i(TAG, "Daemon stopped")
     }
 
     fun speak(text: String) {
-        if (ttsReady) {
-            tts?.speak(text, TextToSpeech.QUEUE_ADD, null, text)
+        if (ttsReady.get()) {
+            try {
+                tts?.speak(text, TextToSpeech.QUEUE_ADD, null, text)
+            } catch (e: Exception) {
+                Log.e(TAG, "TTS speak error", e)
+            }
+        } else {
+            Log.w(TAG, "TTS not ready, cannot speak: $text")
         }
     }
 
@@ -72,6 +207,7 @@ class CypherDaemon(private val context: Context) {
 
         val (toolName, toolArgs) = parseToolCall(response)
         if (toolName != null) {
+            Log.i(TAG, "Tool call detected: $toolName")
             if (!permissions.checkToolPermission(toolName, toolArgs)) {
                 speak("Permission denied, Boss.")
                 return
@@ -89,7 +225,8 @@ class CypherDaemon(private val context: Context) {
         return try {
             val json = org.json.JSONObject(match.groupValues[1])
             json.optString("name") to (json.optJSONObject("arguments")?.toMap() ?: emptyMap())
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse tool call", e)
             null to emptyMap()
         }
     }

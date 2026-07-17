@@ -19,3 +19,6 @@ FetchContent_MakeAvailable(llama.cpp)
 add_library(cypher_brain SHARED llama_jni.cpp)
 target_link_libraries(cypher_brain PRIVATE llama)
 target_include_directories(cypher_brain PRIVATE ${llama.cpp_SOURCE_DIR})
+
+# Required for Android logging
+target_link_libraries(cypher_brain PRIVATE log)

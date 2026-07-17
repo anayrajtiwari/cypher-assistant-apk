@@ -1,11 +1,12 @@
 package ai.cypher.assistant
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,33 +24,52 @@ import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
 
-    private val normalPermissions = listOf(
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val PREFS_NAME = "cypher_prefs"
+        private const val KEY_ALWAYS_ON = "alwaysOnCypherEnabled"
+    }
+
+    private val corePermissions = listOfNotNull(
         Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.READ_PHONE_STATE,
-        Manifest.permission.CALL_PHONE,
-        Manifest.permission.SEND_SMS,
-        Manifest.permission.READ_CONTACTS,
-        Manifest.permission.ACCESS_FINE_LOCATION,
-        Manifest.permission.CAMERA,
-        Manifest.permission.POST_NOTIFICATIONS,
-        Manifest.permission.FOREGROUND_SERVICE_MICROPHONE,
-        Manifest.permission.FOREGROUND_SERVICE_PHONE_CALL,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Manifest.permission.POST_NOTIFICATIONS else null,
+    )
+
+    private val optionalPermissionLabels = mapOf(
+        Manifest.permission.READ_PHONE_STATE to "Phone State",
+        Manifest.permission.CALL_PHONE to "Phone Calls",
+        Manifest.permission.SEND_SMS to "SMS",
+        Manifest.permission.READ_CONTACTS to "Contacts",
+        Manifest.permission.ACCESS_FINE_LOCATION to "Location",
+        Manifest.permission.CAMERA to "Camera",
+        Manifest.permission.ANSWER_PHONE_CALLS to "Answer Calls",
     )
 
     private var serviceStarted = false
 
-    private val permissionLauncher = registerForActivityResult(
+    private val corePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
-        val normalGranted = normalPermissions.all { perm ->
-            result[perm] ?: (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED)
+        val allCoreGranted = corePermissions.all {
+            result[it] == true || ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
-        if (normalGranted && isAnswerPhoneCallsGranted()) {
+        if (allCoreGranted) {
+            setAlwaysOnEnabled(true)
             startCypherService()
-        } else if (normalGranted && !isAnswerPhoneCallsGranted()) {
-            requestAnswerPhoneCalls()
         } else {
-            Toast.makeText(this, "Cypher needs all permissions.", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cypher needs microphone access to function.", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private val optionalPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val denied = result.filter { it.value == false }.keys
+        if (denied.isNotEmpty()) {
+            val deniedLabels = denied.mapNotNull { perm -> optionalPermissionLabels[perm] }
+            Toast.makeText(this, "Optional permissions denied: $deniedLabels", Toast.LENGTH_LONG).show()
+        } else {
+            Toast.makeText(this, "Optional permissions granted.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -59,56 +79,54 @@ class MainActivity : ComponentActivity() {
         setContentView(ComposeView(this).apply {
             setContent {
                 MaterialTheme {
-                    FirstBootScreen(onContinue = { requestAllPermissions() })
+                    CypherUI(
+                        onStart = { requestCorePermissions() },
+                        onGrantOptional = { requestOptionalPermissions() },
+                        hasCore = hasCorePermissions(),
+                    )
                 }
             }
         })
 
-        if (hasAllPermissions()) {
+        if (hasCorePermissions()) {
+            setAlwaysOnEnabled(true)
             startCypherService()
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (!serviceStarted && hasAllPermissions()) {
+        if (!serviceStarted && hasCorePermissions()) {
             startCypherService()
         }
     }
 
-    private fun hasAllPermissions(): Boolean {
-        return normalPermissions.all {
+    private fun hasCorePermissions(): Boolean {
+        return corePermissions.all {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        } && isAnswerPhoneCallsGranted()
+        }
     }
 
-    private fun isAnswerPhoneCallsGranted(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED
-        } else true
-    }
-
-    private fun requestAllPermissions() {
-        val needed = normalPermissions.filter {
+    private fun requestCorePermissions() {
+        val needed = corePermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }.toTypedArray()
         if (needed.isNotEmpty()) {
-            permissionLauncher.launch(needed)
-        } else if (!isAnswerPhoneCallsGranted()) {
-            requestAnswerPhoneCalls()
+            corePermissionLauncher.launch(needed)
         } else {
+            setAlwaysOnEnabled(true)
             startCypherService()
         }
     }
 
-    private fun requestAnswerPhoneCalls() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = android.net.Uri.fromParts("package", packageName, null)
-            }
-            startActivity(intent)
+    private fun requestOptionalPermissions() {
+        val optionalNeeded = optionalPermissionLabels.keys.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }.toTypedArray()
+        if (optionalNeeded.isNotEmpty()) {
+            optionalPermissionLauncher.launch(optionalNeeded)
         } else {
-            startCypherService()
+            Toast.makeText(this, "All optional permissions already granted.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -117,15 +135,32 @@ class MainActivity : ComponentActivity() {
         serviceStarted = true
         try {
             val intent = Intent(this, CypherBackgroundService::class.java)
-            startForegroundService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            Log.i(TAG, "Cypher service started")
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Failed to start service", e)
+            Toast.makeText(this, "Failed to start Cypher: ${e.message}", Toast.LENGTH_LONG).show()
         }
+    }
+
+    private fun setAlwaysOnEnabled(enabled: Boolean) {
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_ALWAYS_ON, enabled)
+            .apply()
     }
 }
 
 @Composable
-fun FirstBootScreen(onContinue: () -> Unit) {
+fun CypherUI(
+    onStart: () -> Unit,
+    onGrantOptional: () -> Unit,
+    hasCore: Boolean,
+) {
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = Color(0xFF0D1117)
@@ -141,22 +176,43 @@ fun FirstBootScreen(onContinue: () -> Unit) {
             Spacer(Modifier.height(8.dp))
             Text("An AI agent by Anay", fontSize = 14.sp, color = Color(0xFF81A1C1))
             Spacer(Modifier.height(32.dp))
-            Text("First Boot — Permission Setup", fontSize = 18.sp, color = Color.White)
+            Text(
+                if (hasCore) "Cypher is running in the background."
+                else "First Boot — Permission Setup",
+                fontSize = 18.sp, color = Color.White
+            )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Cypher needs microphone, phone, SMS,\ncontacts, location, and camera access.",
+                if (hasCore) "Say \"Zed 18\" to activate."
+                else "Cypher needs microphone access to function.\nOther permissions (contacts, SMS, etc.) are optional.",
                 fontSize = 14.sp, color = Color(0xFF81A1C1), lineHeight = 22.sp
             )
             Spacer(Modifier.height(32.dp))
             Button(
-                onClick = onContinue,
+                onClick = onStart,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Color(0xFF00E5FF),
                     contentColor = Color(0xFF0D1117)
                 ),
                 modifier = Modifier.fillMaxWidth().height(56.dp)
             ) {
-                Text("Grant Permissions", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    if (hasCore) "Restart Cypher"
+                    else "Grant Core Permissions",
+                    fontSize = 16.sp, fontWeight = FontWeight.Bold
+                )
+            }
+            if (hasCore) {
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onGrantOptional,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF00E5FF)
+                    ),
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
+                ) {
+                    Text("Grant Optional Permissions", fontSize = 14.sp)
+                }
             }
         }
     }

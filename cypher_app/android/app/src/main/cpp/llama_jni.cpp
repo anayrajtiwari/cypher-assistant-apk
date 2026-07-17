@@ -74,7 +74,7 @@ Java_ai_cypher_assistant_CypherBrain_nativeLoad(
         return 0;
     }
 
-    auto *state = new ModelState{model, ctx, vocab, {}, cparams.n_ctx};
+    auto *state = new ModelState{model, ctx, vocab, {}, static_cast<int>(cparams.n_ctx)};
     LOGI("Native state created with ptr=%p", (void*)state);
     return reinterpret_cast<jlong>(state);
 }

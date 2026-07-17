@@ -101,6 +101,7 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
     private fun attachUtteranceListener() {
         if (ttsListenerAttached) return
         ttsListenerAttached = true
+        previousUtteranceListener = null
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(uid: String) {
                 Log.d(TAG, "TTS started: $uid")
@@ -153,28 +154,23 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
         }
         suspendCancellableCoroutine<Unit> { cont ->
             val utteranceId = "cypher_${System.nanoTime()}"
-            val oldListener = tts?.onUtteranceProgressListener
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(uid: String) {}
                 override fun onDone(uid: String) {
                     if (uid != utteranceId) return
-                    tts?.setOnUtteranceProgressListener(oldListener)
                     if (!cont.isCancelled) cont.resume(Unit)
                 }
                 override fun onError(uid: String) {
                     if (uid != utteranceId) return
-                    tts?.setOnUtteranceProgressListener(oldListener)
                     if (!cont.isCancelled) cont.resume(Unit)
                 }
                 override fun onStop(uid: String, interrupted: Boolean) {
                     if (uid != utteranceId) return
-                    tts?.setOnUtteranceProgressListener(oldListener)
                     if (!cont.isCancelled) cont.resume(Unit)
                 }
             })
             val result = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
             if (result != TextToSpeech.SUCCESS) {
-                tts?.setOnUtteranceProgressListener(oldListener)
                 if (!cont.isCancelled) cont.resume(Unit)
             }
         }

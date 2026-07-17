@@ -358,7 +358,7 @@ class AndroidCapabilities(
         return try {
             val release = updateManager.checkForUpdate()
             if (release == null) return "Could not check for updates. Check internet connection."
-            val current = updateManager.currentVersion
+            val current = updateManager.getCurrentVersion()
             "Current version: $current. Latest: ${release.version} (${release.publishedAt.take(10)}). Say 'install update' to download."
         } catch (e: Exception) {
             Log.e(TAG, "checkForUpdate failed", e)

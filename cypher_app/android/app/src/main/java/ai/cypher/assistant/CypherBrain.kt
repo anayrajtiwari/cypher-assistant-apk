@@ -287,26 +287,90 @@ class CypherBrain(private val context: Context) {
             if (lower.contains(key)) return resp
         }
 
-        val intentMap = mapOf(
-            "battery" to "get_battery_status", "time" to "get_device_time", "date" to "get_device_time",
-            "storage" to "get_storage_status", "contact" to "read_contacts",
-            "location" to "get_location", "where" to "get_location",
-            "call" to "make_phone_call", "sms" to "send_sms", "message" to "send_sms",
-            "photo" to "take_photo", "camera" to "take_photo",
-            "flash" to "toggle_flashlight",
-            "volume" to "set_volume", "clipboard" to "clipboard_read",
-            "vibrate" to "vibrate_device",
-            "url" to "open_url", "browser" to "open_url",
-            "launch" to "launch_app",
+        val intentMap = listOf(
+            KeywordIntent("battery", "get_battery_status"),
+            KeywordIntent("time", "get_device_time",),
+            KeywordIntent("date", "get_device_time"),
+            KeywordIntent("storage", "get_storage_status"),
+            KeywordIntent("contact", "read_contacts"),
+            KeywordIntent("location", "get_location"),
+            KeywordIntent("where", "get_location"),
+            KeywordIntent("call", "make_phone_call", extractAfter = listOf("call ")),
+            KeywordIntent("sms", "send_sms", extractAfter = listOf("sms ")),
+            KeywordIntent("message", "send_sms", extractAfter = listOf("message ")),
+            KeywordIntent("photo", "take_photo"),
+            KeywordIntent("camera", "take_photo"),
+            KeywordIntent("flash", "toggle_flashlight", extractAfter = listOf("flash ")),
+            KeywordIntent("volume", "set_volume", extractAfter = listOf("volume ")),
+            KeywordIntent("clipboard", "clipboard_read"),
+            KeywordIntent("vibrate", "vibrate_device"),
+            KeywordIntent("url", "open_url", extractAfter = listOf("url ", "open ")),
+            KeywordIntent("browser", "open_url", extractAfter = listOf("browser ", "go to ")),
+            KeywordIntent("launch", "launch_app", extractAfter = listOf("launch ", "open ")),
+            KeywordIntent("update", "check_update", extractAfter = listOf("update ")),
+            KeywordIntent("install", "install_update", extractAfter = listOf("install ")),
         )
-        for ((keyword, tool) in intentMap) {
-            if (lower.contains(keyword) && tools.any { it["name"] == tool }) {
-                return "<tool_call>{\"name\":\"$tool\",\"arguments\":{}}</tool_call>"
+
+        for (entry in intentMap) {
+            if (lower.contains(entry.keyword) && tools.any { it["name"] == entry.toolName }) {
+                val args = extractArguments(lower, entry)
+                Log.d(TAG, "intentMap match: keyword='${entry.keyword}' tool='${entry.toolName}' args=$args")
+                return buildToolCall(entry.toolName, args)
             }
         }
 
         return if (!isReady()) "Say 'download model' to install the AI model, Boss."
         else "Say 'What can you do', Boss."
+    }
+
+    private data class KeywordIntent(
+        val keyword: String,
+        val toolName: String,
+        val extractAfter: List<String> = emptyList()
+    )
+
+    private fun extractArguments(lower: String, entry: KeywordIntent): Map<String, String> {
+        if (entry.extractAfter.isEmpty()) return emptyMap()
+
+        val query = extractAfter(lower, entry.extractAfter)
+
+        return when (entry.toolName) {
+            "launch_app" -> mapOf("package" to (query ?: ""))
+            "make_phone_call" -> mapOf("number" to (query ?: ""))
+            "send_sms" -> {
+                val parts = (query ?: "").split(" to ", " say ").map { it.trim() }
+                if (parts.size >= 2) mapOf("message" to parts[0], "number" to parts[1])
+                else mapOf("message" to (query ?: ""), "number" to "")
+            }
+            "open_url" -> mapOf("url" to (query ?: ""))
+            "set_volume" -> {
+                val digits = (query ?: "").filter { it.isDigit() }
+                mapOf("level" to (if (digits.isNotEmpty()) digits else "10"), "stream" to "music")
+            }
+            "toggle_flashlight" -> {
+                val on = query?.lowercase()?.let { it.contains("on") || it.contains("enable") } ?: true
+                mapOf("on" to on.toString())
+            }
+            else -> emptyMap()
+        }
+    }
+
+    private fun extractAfter(input: String, prefixes: List<String>): String? {
+        val lower = input.lowercase().trim()
+        for (prefix in prefixes) {
+            val idx = lower.indexOf(prefix)
+            if (idx != -1) {
+                val after = lower.substring(idx + prefix.length).trim()
+                if (after.isNotBlank()) return after
+                return null
+            }
+        }
+        return null
+    }
+
+    private fun buildToolCall(name: String, args: Map<String, String>): String {
+        val argsJson = args.entries.joinToString(",") { (k, v) -> "\"$k\":\"$v\"" }
+        return "<tool_call>{\"name\":\"$name\",\"arguments\":{$argsJson}}</tool_call>"
     }
 
     private fun buildPrompt(input: String, toolsBlock: String): String {

@@ -39,6 +39,8 @@ class AndroidCapabilities(
         try { context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager } catch (e: Exception) { null }
     }
 
+    private val updateManager: UpdateManager by lazy { UpdateManager(context) }
+
     fun getBatteryStatus(): String {
         return try {
             val intent = context.registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -182,7 +184,25 @@ class AndroidCapabilities(
     fun launchApp(packageName: String): String {
         if (packageName.isBlank()) return "No package name provided."
         return try {
-            val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+            val pm = context.packageManager
+            val resolvedPkg = resolvePackageName(packageName)
+            if (resolvedPkg == null) {
+                val displayNames = findAppsByDisplayName(packageName)
+                if (displayNames.isEmpty()) {
+                    return "App \"$packageName\" not found."
+                }
+                if (displayNames.size == 1) {
+                    val (pkg, label) = displayNames[0]
+                    val intent = pm.getLaunchIntentForPackage(pkg)
+                        ?: return "$label ($pkg) cannot be launched."
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(intent)
+                    return "Launched $label."
+                }
+                val list = displayNames.joinToString("\n") { (pkg, label) -> "$label ($pkg)" }
+                return "Multiple apps match \"$packageName\":\n$list"
+            }
+            val intent = pm.getLaunchIntentForPackage(resolvedPkg)
                 ?: return "App $packageName not found."
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(intent)
@@ -191,6 +211,34 @@ class AndroidCapabilities(
             Log.e(TAG, "launchApp failed", e)
             "Failed to launch $packageName."
         }
+    }
+
+    private fun resolvePackageName(input: String): String? {
+        val pm = context.packageManager
+        val lower = input.lowercase()
+        pm.getInstalledApplications(PackageManager.GET_META_DATA).forEach { app ->
+            if (app.packageName.lowercase() == lower ||
+                app.packageName.lowercase().contains(lower)
+            ) {
+                return app.packageName
+            }
+        }
+        return null
+    }
+
+    private fun findAppsByDisplayName(input: String): List<Pair<String, String>> {
+        val pm = context.packageManager
+        val lower = input.lowercase()
+        val results = mutableListOf<Pair<String, String>>()
+        pm.getInstalledApplications(PackageManager.GET_META_DATA).forEach { app ->
+            val label = app.loadLabel(pm).toString()
+            if (label.lowercase() == lower || label.lowercase().contains(lower)) {
+                if (!results.any { it.first == app.packageName }) {
+                    results.add(app.packageName to label)
+                }
+            }
+        }
+        return results
     }
 
     fun takePhoto(): String {
@@ -306,6 +354,35 @@ class AndroidCapabilities(
         }
     }
 
+    fun checkForUpdate(): String {
+        return try {
+            val release = updateManager.checkForUpdate()
+            if (release == null) return "Could not check for updates. Check internet connection."
+            val current = updateManager.currentVersion
+            "Current version: $current. Latest: ${release.version} (${release.publishedAt.take(10)}). Say 'install update' to download."
+        } catch (e: Exception) {
+            Log.e(TAG, "checkForUpdate failed", e)
+            "Update check failed."
+        }
+    }
+
+    fun downloadAndInstallUpdate(): String {
+        return try {
+            val release = updateManager.checkForUpdate()
+                ?: return "No update available or could not fetch release info."
+            val apk = kotlinx.coroutines.runBlocking {
+                updateManager.downloadUpdate(release.apkUrl)
+            }
+            if (apk == null) return "Download failed."
+            val ok = updateManager.installApk(apk)
+            if (ok) "Downloaded ${release.version}. Follow the prompts to install."
+            else "Installation failed. Try again."
+        } catch (e: Exception) {
+            Log.e(TAG, "downloadAndInstallUpdate failed", e)
+            "Update failed: ${e.message}"
+        }
+    }
+
     fun getToolDefinitions(): List<Map<String, Any>> {
         return listOf(
             tool("get_battery_status", "Get battery level and charging status."),
@@ -330,6 +407,8 @@ class AndroidCapabilities(
             tool("open_url", "Open a URL in the browser.", explicit = true, params = mapOf("url" to "string"), required = listOf("url")),
             tool("send_notification", "Send a system notification.", explicit = true, params = mapOf("title" to "string", "content" to "string"), required = listOf("title", "content")),
             tool("tts_speak", "Speak text out loud via TTS.", params = mapOf("text" to "string"), required = listOf("text")),
+            tool("check_update", "Check for Cypher app updates on GitHub."),
+            tool("install_update", "Download and install the latest Cypher update."),
         )
     }
 
@@ -369,6 +448,8 @@ class AndroidCapabilities(
                 "open_url" -> openUrl(args["url"]?.toString() ?: "")
                 "send_notification" -> sendNotification(args["title"]?.toString() ?: "", args["content"]?.toString() ?: "")
                 "tts_speak" -> "OK"
+                "check_update" -> checkForUpdate()
+                "install_update" -> downloadAndInstallUpdate()
                 else -> "Unknown tool: $name"
             }
         } catch (e: Exception) {

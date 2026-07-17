@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <external-files-path name="cypher_photos" path="Cypher/photos/" />
+    <cache-path name="cypher_updates" path="cypher-update.apk" />
 </paths>

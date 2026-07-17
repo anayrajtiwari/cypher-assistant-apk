@@ -66,7 +66,7 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
                     val ready = status == TextToSpeech.SUCCESS
                     ttsReady.set(ready)
                     if (ready) {
-                        tts?.language = Locale.US
+                        setMaleVoice()
                         Log.i(TAG, "TTS initialized successfully")
                     } else {
                         Log.w(TAG, "TTS initialization failed with status: $status")
@@ -76,6 +76,35 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
         } catch (e: Exception) {
             Log.e(TAG, "TTS initialization error", e)
             ttsReady.set(false)
+        }
+    }
+
+    private fun setMaleVoice() {
+        val engine = tts ?: return
+        engine.language = Locale.US
+        engine.setPitch(0.85f)
+        engine.setSpeechRate(0.95f)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                val maleVoice = engine.voices?.firstOrNull { voice ->
+                    voice.locale.language == "en" && (
+                        voice.name.contains("male", ignoreCase = true) ||
+                        voice.name.contains("en-us-x-tp", ignoreCase = true)
+                    )
+                }
+                if (maleVoice != null) {
+                    engine.voice = maleVoice
+                    Log.i(TAG, "Set male voice: ${maleVoice.name}")
+                } else {
+                    engine.setPitch(0.78f)
+                    Log.w(TAG, "No male voice found, using lower pitch (0.78)")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Voice selection failed, using default with lower pitch", e)
+                engine.setPitch(0.78f)
+            }
+        } else {
+            engine.setPitch(0.78f)
         }
     }
 

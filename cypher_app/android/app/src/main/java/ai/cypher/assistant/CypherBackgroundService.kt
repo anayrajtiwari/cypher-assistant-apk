@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -19,7 +21,11 @@ class CypherBackgroundService : Service() {
 
     companion object {
         private const val TAG = "CypherService"
-        const val CHANNEL_ID = "cypher_foreground"
+
+        private const val CHANNEL_ID = "cypher_foreground_silent"
+        private const val CHANNEL_NAME = "Cypher"
+        private const val CHANNEL_DESC = "Cypher persistent assistant notification"
+
         const val NOTIFICATION_ID = 1001
     }
 
@@ -31,7 +37,7 @@ class CypherBackgroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "Service created")
-        createNotificationChannel()
+        createSilentNotificationChannel()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -118,21 +124,26 @@ class CypherBackgroundService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    private fun createNotificationChannel() {
+    private fun createSilentNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             try {
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 if (manager.getNotificationChannel(CHANNEL_ID) == null) {
                     val channel = NotificationChannel(
                         CHANNEL_ID,
-                        "Cypher",
+                        CHANNEL_NAME,
                         NotificationManager.IMPORTANCE_LOW
                     ).apply {
-                        description = "Cypher background service"
+                        description = CHANNEL_DESC
                         setShowBadge(false)
+                        enableVibration(false)
+                        setSound(null, null as AudioAttributes?)
+                        setBlockable(false)
                     }
                     manager.createNotificationChannel(channel)
-                    Log.i(TAG, "Notification channel created")
+                    Log.i(TAG, "Silent notification channel created (id=$CHANNEL_ID)")
+                } else {
+                    Log.i(TAG, "Silent notification channel already exists (id=$CHANNEL_ID)")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to create notification channel", e)
@@ -147,6 +158,8 @@ class CypherBackgroundService : Service() {
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
+            .setSilent(true)
+            .setOnlyAlertOnce(true)
             .build()
     }
 }

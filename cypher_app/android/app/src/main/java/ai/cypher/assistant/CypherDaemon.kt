@@ -101,7 +101,6 @@ class CypherDaemon(private val context: Context, private val scope: CoroutineSco
     private fun attachUtteranceListener() {
         if (ttsListenerAttached) return
         ttsListenerAttached = true
-        previousUtteranceListener = null
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(uid: String) {
                 Log.d(TAG, "TTS started: $uid")
